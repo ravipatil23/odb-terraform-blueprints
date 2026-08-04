@@ -1,0 +1,23 @@
+# Terraform working files — these blueprints are templates to copy and run,
+# so nothing produced by a local run belongs in the repo.
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+
+# Lock files are intentionally not committed: each blueprint is initialised
+# fresh by whoever copies it, against whatever provider version they pin.
+.terraform.lock.hcl
+
+# Variable files holding real values. terraform.tfvars IS tracked here — it is
+# the hand-fillable example that makes each blueprint usable.
+*.auto.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Archives / exports
+*.zip

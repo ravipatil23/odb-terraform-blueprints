@@ -21,6 +21,9 @@ These are plain `.tf` files you copy and run — no code generation, no framewor
   # ── Data Guard networking between two existing VM clusters ──
   multi-az-dataguard/       Same-region DR  (LPG-peered: LPG pair + NSG rules)
   cross-region-dataguard/   Cross-region DR (Hub VCN + DRG + remote peering)
+
+  # ── DNS ──
+  azure-dns-hub/            Custom DNS Scenario #2 — Exadata VCNs → central DNS Hub VCN
 ```
 
 A typical flow: provision with a `db-at-*` blueprint → create databases with `oci-database`
@@ -65,6 +68,7 @@ terraform apply
 | oci-database | `oracle/oci` | `>= 6.0.0` |
 | multi-az-dataguard | `oracle/oci` | `>= 6.0.0` |
 | cross-region-dataguard | `oracle/oci` | `>= 6.0.0` |
+| azure-dns-hub | `oracle/oci` | `>= 6.0.0` |
 
 Terraform `>= 1.5.0` (or OpenTofu `>= 1.6.0`) — the map variables use optional object attributes.
 

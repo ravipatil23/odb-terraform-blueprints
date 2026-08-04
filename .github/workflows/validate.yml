@@ -37,6 +37,7 @@ jobs:
           - oci-database
           - multi-az-dataguard
           - cross-region-dataguard
+          - azure-dns-hub
     defaults:
       run:
         working-directory: ${{ matrix.dir }}

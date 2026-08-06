@@ -44,9 +44,16 @@ resource "google_oracle_database_cloud_exadata_infrastructure" "this" {
   }
 
   lifecycle {
+    # The resource is immutable in the provider, so any drift here proposes a
+    # rebuild of the Exadata hardware rather than an in-place change.
+    #
+    # total_storage_size_gb is default_from_api (Computed) — the service sizes it.
+    # compute_count / storage_count are plain inputs, guarded because elastic
+    # expansion performed outside Terraform would otherwise propose a rebuild.
     ignore_changes = [
       properties[0].compute_count,
       properties[0].storage_count,
+      properties[0].total_storage_size_gb,
     ]
   }
 }

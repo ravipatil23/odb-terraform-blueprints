@@ -377,10 +377,47 @@ DB Homes / CDBs / PDBs on the cluster.
   the peering first, then uncomment the `peer_network_cidrs` line in `modules/peering/main.tf` and the
   `peer_network_cidrs` variable, wire it through, and re-apply to manage allowed CIDRs.
 - **State:** local by default. For team use, add an `backend "s3"` block to `main.tf` and re-init.
+- **No `ignore_changes` guards here, deliberately.** Nearly every ODB argument forces replacement, so
+  it is fair to ask why this blueprint has no drift guards while the GCP and Azure ones do. The AWS
+  provider keeps your input and the service's resolved value in *separate* fields, so they never
+  collide:
+
+  | You set | Provider exposes the resolved value as |
+  |---|---|
+  | `gi_version` (e.g. `19.0.0.0`) | `gi_version_computed` (the full release) |
+  | `hostname_prefix` | `hostname_prefix_computed` (prefix + generated suffix) |
+  | `storage_count` | `activated_storage_count` / `additional_storage_count` |
+
+  Read reconstructs your major version rather than overwriting it, so a plan stays clean without any
+  guard. Adding `ignore_changes` would only suppress drift you genuinely want reported. If you ever
+  do see a plan proposing a replacement, find the culprit before reaching for a guard:
+
+  ```bash
+  terraform plan -no-color | grep -B2 'forces replacement'
+  ```
 
 ---
 
 ## 12. Destroying
+
+**The ODB Network, Exadata Infrastructure and VM Cluster are delete-protected.** Each carries
+`lifecycle { prevent_destroy = true }`, so `terraform destroy` — and any plan that would replace
+them — fails with an error naming the resource, rather than tearing down hardware that takes hours
+to rebuild and databases that do not come back.
+
+To remove one deliberately, delete the `lifecycle` block from that module's `main.tf`, `apply`, then
+destroy:
+
+```bash
+# e.g. to allow the VM cluster to be destroyed
+#   edit modules/vm-cluster/main.tf, remove the lifecycle block
+terraform apply
+terraform destroy
+```
+
+`prevent_destroy` only accepts a literal, so unlike the GCP blueprint's `deletion_protection` input
+it cannot be toggled from `terraform.tfvars` — editing the module is the only route. Network
+peering is deliberately left unprotected, being cheap to recreate.
 
 ```bash
 terraform destroy

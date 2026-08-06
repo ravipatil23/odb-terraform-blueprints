@@ -41,4 +41,15 @@ resource "aws_odb_cloud_vm_cluster" "this" {
     update = "2h"
     delete = "8h"
   }
+
+  lifecycle {
+    # Delete protection. The VM cluster holds your databases — destroying it
+    # destroys them, and no amount of re-applying brings the data back.
+    #
+    # This has to be a literal — prevent_destroy rejects variable references, so
+    # unlike the GCP blueprint's deletion_protection input it cannot be flipped
+    # from terraform.tfvars. To tear this down deliberately, delete this
+    # lifecycle block, apply, then destroy.
+    prevent_destroy = true
+  }
 }

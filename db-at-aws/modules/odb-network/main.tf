@@ -28,4 +28,15 @@ resource "aws_odb_network" "this" {
     update = "2h"
     delete = "8h"
   }
+
+  lifecycle {
+    # Delete protection. Every other resource in this blueprint hangs off the ODB
+    # Network, so destroying it takes the whole stack with it.
+    #
+    # This has to be a literal — prevent_destroy rejects variable references, so
+    # unlike the GCP blueprint's deletion_protection input it cannot be flipped
+    # from terraform.tfvars. To tear this down deliberately, delete this
+    # lifecycle block, apply, then destroy.
+    prevent_destroy = true
+  }
 }

@@ -31,4 +31,16 @@ resource "aws_odb_cloud_exadata_infrastructure" "this" {
   }
 
   tags = var.tags
+
+  lifecycle {
+    # Delete protection. Exadata infrastructure takes hours to provision and is
+    # billed as dedicated hardware, so an accidental destroy is expensive twice
+    # over.
+    #
+    # This has to be a literal — prevent_destroy rejects variable references, so
+    # unlike the GCP blueprint's deletion_protection input it cannot be flipped
+    # from terraform.tfvars. To tear this down deliberately, delete this
+    # lifecycle block, apply, then destroy.
+    prevent_destroy = true
+  }
 }

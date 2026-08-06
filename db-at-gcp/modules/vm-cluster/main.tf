@@ -57,6 +57,15 @@ resource "google_oracle_database_cloud_vm_cluster" "this" {
   }
 
   lifecycle {
+    # The whole resource is immutable in the provider, so ANY drift proposes a
+    # replacement rather than an in-place update. The fields below are
+    # default_from_api (Computed): the service supplies or normalises them, so
+    # comparing them against config is what produces a spurious rebuild.
+    #
+    # gi_version and hostname_prefix are deliberately absent: the provider marks
+    # both ignore_read, so the API value is never read back over your config and
+    # no guard is needed. (This is where Database@Azure differs — there the API
+    # value does overwrite config, which is why the Azure blueprint guards them.)
     ignore_changes = [
       properties[0].db_server_ocids,
       properties[0].cpu_core_count,
@@ -66,6 +75,11 @@ resource "google_oracle_database_cloud_vm_cluster" "this" {
       properties[0].local_backup_enabled,
       properties[0].sparse_diskgroup_enabled,
       properties[0].ssh_public_keys,
+      # Also default_from_api. Harmless while left null — Terraform adopts
+      # whatever the API reports — but a replacement risk the moment someone
+      # sets them in terraform.tfvars and the service normalises the value.
+      properties[0].ocpu_count,
+      properties[0].node_count,
     ]
   }
 }

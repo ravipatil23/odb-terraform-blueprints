@@ -323,10 +323,23 @@ DB Homes / CDBs / PDBs on the cluster.
 ## 11. Day-2 operations
 
 - **Change CPU/memory/storage:** the VM cluster module marks `cpu_core_count`, `memory_size_gb`,
-  `db_node_storage_size_gb`, `data_storage_size_tb`, `ssh_public_keys`, and `db_server_ocids` under
-  `lifecycle { ignore_changes }`. This prevents drift (e.g. elastic scaling performed in the console)
-  from forcing a destroy/recreate. To resize *through Terraform*, remove the relevant field from
-  `ignore_changes` in `modules/vm-cluster/main.tf` first.
+  `db_node_storage_size_gb`, `data_storage_size_tb`, `ssh_public_keys`, `db_server_ocids`,
+  `ocpu_count`, and `node_count` under `lifecycle { ignore_changes }`. This prevents drift (e.g.
+  elastic scaling performed in the console) from forcing a destroy/recreate. To resize *through
+  Terraform*, remove the relevant field from `ignore_changes` in `modules/vm-cluster/main.tf` first.
+
+  All three resources are `immutable` in the provider, so **any** drift proposes a replacement
+  rather than an in-place update — which is why the guards exist at all. The guarded fields are the
+  `default_from_api` ones, where the service supplies or normalises the value and comparing it
+  against config produces a spurious rebuild. `ocpu_count` and `node_count` are harmless while left
+  `null` (Terraform simply adopts what the API reports) and only become a risk once they are set
+  explicitly in `terraform.tfvars`.
+
+- **`gi_version` is deliberately *not* guarded.** The provider marks it `ignore_read: true`, so the
+  resolved release the service reports is never read back over your config — the same is true of
+  `hostname_prefix`, with the full name exposed separately as the read-only `hostname`. Adding them
+  to `ignore_changes` would suppress genuine drift for no benefit. (Database@Azure behaves
+  differently: there the API value *does* overwrite config, so the Azure blueprint has to guard it.)
 - **Add SSH keys:** because `ssh_public_keys` is in `ignore_changes`, key changes via tfvars are not
   applied by default — manage keys in the console, or remove it from `ignore_changes`.
 - **State:** this blueprint uses local state by default. For team use, add a `backend "gcs"` block to

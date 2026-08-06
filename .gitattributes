@@ -1,0 +1,18 @@
+# Normalise line endings so the repo does not churn when it is worked on from
+# more than one machine. Without this, a checkout on Windows can re-commit every
+# file with CRLF and produce a diff touching the whole tree with no real change.
+#
+# text=auto  - Git decides what is text and stores it with LF in the repository.
+# eol=lf     - working copies also get LF, on every platform.
+* text=auto eol=lf
+
+# Binary formats: never touch these.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.pdf  binary
+*.zip  binary
+*.xlsx binary
+*.pptx binary
+*.docx binary

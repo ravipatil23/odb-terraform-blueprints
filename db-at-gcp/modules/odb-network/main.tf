@@ -21,6 +21,19 @@ resource "google_oracle_database_odb_network" "this" {
     update = "2h"
     delete = "8h"
   }
+
+  lifecycle {
+    # The resource is immutable in the provider, so drift here proposes replacing
+    # the network - and every subnet, infra and cluster that hangs off it.
+    #
+    # gcp_oracle_zone is default_from_api: the service picks a zone when none is
+    # given. Harmless while the variable stays null, since Terraform then adopts
+    # whatever the API reports, but a replacement risk the moment someone sets it
+    # in terraform.tfvars and the service normalises the value.
+    ignore_changes = [
+      gcp_oracle_zone,
+    ]
+  }
 }
 
 resource "google_oracle_database_odb_subnet" "client" {

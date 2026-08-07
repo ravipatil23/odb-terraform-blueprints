@@ -342,6 +342,9 @@ DB Homes / CDBs / PDBs on the cluster.
   differently: there the API value *does* overwrite config, so the Azure blueprint has to guard it.)
 - **Add SSH keys:** because `ssh_public_keys` is in `ignore_changes`, key changes via tfvars are not
   applied by default — manage keys in the console, or remove it from `ignore_changes`.
+- **ODB network:** `gcp_oracle_zone` is under `ignore_changes` in `modules/odb-network/main.tf`. It
+  is `default_from_api`, so the service picks a zone when none is given; guarding it stops a
+  normalised value from proposing a replacement of the network and everything beneath it.
 - **State:** this blueprint uses local state by default. For team use, add a `backend "gcs"` block to
   `main.tf` and re-run `terraform init`.
 

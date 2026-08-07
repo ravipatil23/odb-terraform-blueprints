@@ -51,5 +51,30 @@ resource "aws_odb_cloud_vm_cluster" "this" {
     # from terraform.tfvars. To tear this down deliberately, delete this
     # lifecycle block, apply, then destroy.
     prevent_destroy = true
+
+    # Every argument below is ForceNew, so drift proposes destroying the cluster
+    # rather than updating it. These are the ones that move without Terraform:
+    # elastic scaling done from the console, key rotation on the nodes, and -
+    # with db_servers_mode = "auto" - the data.aws_odb_db_servers lookup
+    # returning a different set after the infra changes.
+    #
+    # To resize *through* Terraform, remove the relevant entry first.
+    ignore_changes = [
+      db_servers,
+      cpu_core_count,
+      memory_size_in_gbs,
+      db_node_storage_size_in_gbs,
+      data_storage_size_in_tbs,
+      is_local_backup_enabled,
+      is_sparse_diskgroup_enabled,
+      ssh_public_keys,
+
+      # gi_version is deliberately left out. The AWS provider stores the
+      # resolved release separately as gi_version_computed and reconstructs your
+      # major version on read, so it does not drift - guarding it would only
+      # hide a version change you made on purpose. Uncomment only if you see a
+      # plan actually proposing replacement over it.
+      # gi_version,
+    ]
   }
 }

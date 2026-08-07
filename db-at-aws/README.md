@@ -377,10 +377,17 @@ DB Homes / CDBs / PDBs on the cluster.
   the peering first, then uncomment the `peer_network_cidrs` line in `modules/peering/main.tf` and the
   `peer_network_cidrs` variable, wire it through, and re-apply to manage allowed CIDRs.
 - **State:** local by default. For team use, add an `backend "s3"` block to `main.tf` and re-init.
-- **No `ignore_changes` guards here, deliberately.** Nearly every ODB argument forces replacement, so
-  it is fair to ask why this blueprint has no drift guards while the GCP and Azure ones do. The AWS
-  provider keeps your input and the service's resolved value in *separate* fields, so they never
-  collide:
+- **Drift guards on the VM cluster.** Every ODB argument is ForceNew, so drift proposes destroying
+  the cluster rather than updating it. `modules/vm-cluster/main.tf` puts the fields that move
+  without Terraform under `lifecycle { ignore_changes }`: `db_servers`, `cpu_core_count`,
+  `memory_size_in_gbs`, `db_node_storage_size_in_gbs`, `data_storage_size_in_tbs`,
+  `is_local_backup_enabled`, `is_sparse_diskgroup_enabled`, and `ssh_public_keys`. That covers
+  elastic scaling from the console, key rotation on the nodes, and — with `db_servers_mode = "auto"`
+  — the `data.aws_odb_db_servers` lookup returning a different set after the infra changes. To
+  resize *through* Terraform, remove the relevant entry first.
+
+- **`gi_version` is deliberately not guarded.** The AWS provider stores the resolved release
+  separately and reconstructs your major version on read, so it does not drift:
 
   | You set | Provider exposes the resolved value as |
   |---|---|
@@ -388,9 +395,8 @@ DB Homes / CDBs / PDBs on the cluster.
   | `hostname_prefix` | `hostname_prefix_computed` (prefix + generated suffix) |
   | `storage_count` | `activated_storage_count` / `additional_storage_count` |
 
-  Read reconstructs your major version rather than overwriting it, so a plan stays clean without any
-  guard. Adding `ignore_changes` would only suppress drift you genuinely want reported. If you ever
-  do see a plan proposing a replacement, find the culprit before reaching for a guard:
+  It ships commented out in the `ignore_changes` list. Uncomment it only if a plan actually proposes
+  replacement over it — find the culprit first:
 
   ```bash
   terraform plan -no-color | grep -B2 'forces replacement'
@@ -400,7 +406,7 @@ DB Homes / CDBs / PDBs on the cluster.
 
 ## 12. Destroying
 
-**The ODB Network, Exadata Infrastructure and VM Cluster are delete-protected.** Each carries
+**All four resources — ODB Network, Exadata Infrastructure, VM Cluster and Peering — are delete-protected.** Each carries
 `lifecycle { prevent_destroy = true }`, so `terraform destroy` — and any plan that would replace
 them — fails with an error naming the resource, rather than tearing down hardware that takes hours
 to rebuild and databases that do not come back.
@@ -416,8 +422,7 @@ terraform destroy
 ```
 
 `prevent_destroy` only accepts a literal, so unlike the GCP blueprint's `deletion_protection` input
-it cannot be toggled from `terraform.tfvars` — editing the module is the only route. Network
-peering is deliberately left unprotected, being cheap to recreate.
+it cannot be toggled from `terraform.tfvars` — editing the module is the only route.
 
 ```bash
 terraform destroy

@@ -16,4 +16,16 @@ resource "aws_odb_network_peering_connection" "this" {
   # peer_network_cidrs = var.peer_network_cidrs
 
   tags = var.tags
+
+  lifecycle {
+    # Delete protection, consistent with the other modules. A peering connection
+    # is cheap to recreate, but tearing it down severs connectivity between the
+    # ODB network and the peered VPC while it is rebuilt.
+    #
+    # This has to be a literal — prevent_destroy rejects variable references, so
+    # unlike the GCP blueprint's deletion_protection input it cannot be flipped
+    # from terraform.tfvars. To tear this down deliberately, delete this
+    # lifecycle block, apply, then destroy.
+    prevent_destroy = true
+  }
 }

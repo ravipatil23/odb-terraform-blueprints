@@ -21,3 +21,20 @@ output "vm_clusters" {
     ocid       = v.ocid
   } }
 }
+
+output "resource_anchors" {
+  description = "Resource Anchor details keyed by the azure_resource_anchors key."
+  value = { for k, m in module.resource_anchor : k => {
+    id                    = m.id
+    location              = m.location
+    linked_compartment_id = m.linked_compartment_id
+  } }
+}
+
+output "network_anchors" {
+  description = "Network Anchor details keyed by the azure_network_anchors key."
+  value = { for k, m in module.network_anchor : k => {
+    id   = m.id
+    name = m.name
+  } }
+}

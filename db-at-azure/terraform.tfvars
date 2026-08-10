@@ -16,6 +16,59 @@ tags = {
   ManagedBy   = "Terraform"
 }
 
+# ── Resource Anchors (optional) ───────────────────────────────────────────────
+# Maps a resource group to an OCI compartment. The foundational Database@Azure
+# resource - the Network Anchor, Exadata infrastructure and VM clusters all need
+# one to exist in the resource group first.
+#
+# Leave both maps empty and this blueprint behaves exactly as before: no anchor is
+# created and nothing else changes.
+#
+# azure_resource_anchors = {
+#   anchor1 = {
+#     name = "anchor-oracle-prod"
+#     # resource_group_name = "rg-other"   # defaults to the stack resource_group_name
+#   }
+# }
+
+# Already have an anchor, provisioned by hand or by a platform team? Give its ID
+# here instead of describing it above, and reference the same key from
+# azure_network_anchors.anchor_ref. Entries here are referenced only: Terraform
+# never creates, changes or destroys them. Keep each anchor in one map or the
+# other - a key in both is rejected before apply.
+#
+# existing_resource_anchor_ids = {
+#   anchor1 = "/subscriptions/.../resourceGroups/rg-oracle-prod/providers/Oracle.Database/resourceAnchors/anchor-oracle-prod"
+# }
+
+# ── Network Anchors (optional) ────────────────────────────────────────────────
+# Bridges a delegated subnet to OCI. Required for an Oracle Base Database; not
+# needed for Exadata VM clusters alone.
+#
+# anchor_ref matches a key in azure_resource_anchors or existing_resource_anchor_ids.
+# vnet_ref matches a key in azure_vnets and supplies the delegated subnet.
+#
+# azure_network_anchors = {
+#   netanchor1 = {
+#     name       = "netanchor-prod"        # 3-24 chars, letters/numbers/hyphens
+#     anchor_ref = "anchor1"
+#     vnet_ref   = "vnet1"
+#     zones      = ["2"]                   # AZ the Base Database will reside in
+#
+#     # oci_vcn_dns_label     = "prodvcn"
+#     # oci_backup_cidr_block = "10.0.2.0/24"   # not needed for Base Database
+#
+#     # ── DNS (all default false) ──
+#     # dns_listening_endpoint_enabled  = true          # Azure apps resolve DB FQDNs
+#     # dns_listening_allowed_cidrs     = "10.0.0.0/16" # comma-separated
+#     # dns_forwarding_endpoint_enabled = true          # DB instances resolve Azure FQDNs
+#     # dns_forwarding_rules = [
+#     #   { domain_names = "corp.example.com", forwarding_ip_address = "10.0.0.4" },
+#     # ]
+#     # dns_zone_sync_enabled = true                    # replicate DB zones into Azure
+#   }
+# }
+
 # ── VNets (+ Oracle-delegated subnet) ─────────────────────────────────────────
 azure_vnets = {
   vnet1 = {

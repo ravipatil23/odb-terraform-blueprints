@@ -20,6 +20,57 @@ variable "tags" {
   default = {}
 }
 
+# ── Resource Anchors ──────────────────────────────────────────────────────────
+# The foundational Database@Azure resource: maps a resource group to an OCI
+# compartment. Leave empty and nothing is created - use existing_resource_anchor_ids
+# to point at one a platform team already provisioned.
+variable "azure_resource_anchors" {
+  description = "Map of Resource Anchors keyed by a short name used as anchor_ref."
+  type = map(object({
+    name = string
+    # Defaults to the stack-level resource_group_name when null.
+    resource_group_name = optional(string, null)
+  }))
+  default = {}
+}
+
+variable "existing_resource_anchor_ids" {
+  description = "Azure resource IDs of Resource Anchors that already exist, keyed by the name used in azure_network_anchors.anchor_ref. Referenced only - never created, changed or destroyed."
+  type        = map(string)
+  default     = {}
+}
+
+# ── Network Anchors ───────────────────────────────────────────────────────────
+# Bridges a delegated subnet to OCI. Requires a Resource Anchor and a subnet
+# delegated to Oracle.Database/networkAttachment.
+variable "azure_network_anchors" {
+  description = "Map of Network Anchors keyed by a short name."
+  type = map(object({
+    name       = string # 3-24 chars, letters/numbers/hyphens
+    anchor_ref = string # key in azure_resource_anchors or existing_resource_anchor_ids
+    vnet_ref   = string # key in azure_vnets - supplies the delegated subnet
+
+    # Default to the stack-level values when null.
+    resource_group_name = optional(string, null)
+    location            = optional(string, null)
+
+    zones = optional(list(string), []) # AZ the Base Database will reside in, e.g. ["2"]
+
+    oci_vcn_dns_label     = optional(string, "") # optional when DNS config is supplied
+    oci_backup_cidr_block = optional(string, "") # not needed for Base Database
+
+    dns_listening_endpoint_enabled  = optional(bool, false) # Azure apps resolve DB FQDNs
+    dns_listening_allowed_cidrs     = optional(string, "")  # comma-separated CIDRs
+    dns_forwarding_endpoint_enabled = optional(bool, false) # DB instances resolve Azure FQDNs
+    dns_forwarding_rules = optional(list(object({
+      domain_names          = string # comma-separated
+      forwarding_ip_address = string
+    })), [])
+    dns_zone_sync_enabled = optional(bool, false) # replicate DB private DNS zones into Azure
+  }))
+  default = {}
+}
+
 # ── VNets ─────────────────────────────────────────────────────────────────────
 variable "azure_vnets" {
   description = "Map of VNets with an Oracle-delegated subnet. Key is referenced by azure_clusters.vnet_ref."

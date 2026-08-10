@@ -31,16 +31,37 @@ the `.tf` files are reusable as-is.
 
 ## 1. What this deploys
 
-| Order | Resource | Terraform resource | Module |
-|-------|----------|--------------------|--------|
-| 1 | VNet + Oracle-delegated subnet | `azurerm_virtual_network`, `azurerm_subnet` | `modules/vnet` |
-| 2 | Exadata Infrastructure | `azurerm_oracle_exadata_infrastructure` | `modules/exadata-infra` |
-| 3 | VM Cluster | `azurerm_oracle_cloud_vm_cluster` | `modules/vm-cluster` |
+| Order | Resource | Terraform resource | Module | Optional |
+|-------|----------|--------------------|--------|----------|
+| 1 | Resource Anchor | `azurerm_oracle_resource_anchor` | `modules/resource-anchor` | yes |
+| 2 | VNet + Oracle-delegated subnet | `azurerm_virtual_network`, `azurerm_subnet` | `modules/vnet` | |
+| 3 | Network Anchor | `azapi_resource` (`Oracle.Database/networkAnchors`) | `modules/network-anchor` | yes |
+| 4 | Exadata Infrastructure | `azurerm_oracle_exadata_infrastructure` | `modules/exadata-infra` | |
+| 5 | VM Cluster | `azurerm_oracle_cloud_vm_cluster` | `modules/vm-cluster` | |
 
 The subnet is automatically **delegated to `Oracle.Database/networkAttachments`**, which Azure
 requires before a VM cluster can attach to it.
 
-**Provider:** `hashicorp/azurerm >= 4.9.0` · **Terraform:** `>= 1.5.0` (or OpenTofu `>= 1.6.0`).
+### Anchors are opt-in
+
+The two anchor maps default to empty, so a configuration that does not mention them
+deploys exactly what it always did.
+
+- **Resource Anchor** maps a resource group to an OCI compartment. It is the
+  foundational Database@Azure resource — everything else needs one to exist in the
+  resource group first. Nothing takes its ID as an argument, so the ordering is
+  expressed with `depends_on` rather than by wiring.
+- **Network Anchor** bridges the delegated subnet to OCI. Required for an Oracle
+  **Base Database**; not needed for Exadata VM clusters on their own.
+
+Already have anchors from a platform team? Put their IDs in
+`existing_resource_anchor_ids` rather than describing them — see [9](#9-scaling-adding-more-resources).
+
+**Providers:** `hashicorp/azurerm >= 4.9.0`, plus `Azure/azapi >= 2.0.0` for Network
+Anchors only — `azurerm` has no native resource for `Oracle.Database/networkAnchors`.
+`required_providers` cannot be conditional, so azapi is always declared; with no
+network anchors configured, nothing is created through it.
+**Terraform:** `>= 1.5.0` (or OpenTofu `>= 1.6.0`).
 
 ---
 
@@ -126,7 +147,9 @@ db-at-azure/
 ├── outputs.tf           # outputs (do not need to edit)
 ├── terraform.tfvars     # ◀── YOU EDIT THIS
 └── modules/
+    ├── resource-anchor/ # Resource Anchor  (optional, foundational)
     ├── vnet/            # VNet + Oracle-delegated subnet
+    ├── network-anchor/  # Network Anchor   (optional, needs a subnet + Resource Anchor)
     ├── exadata-infra/   # Exadata infrastructure
     └── vm-cluster/      # VM cluster
 ```
@@ -343,6 +366,49 @@ after the first apply:
 ```bash
 terraform state show 'module.vm_cluster["vmc1"].azurerm_oracle_cloud_vm_cluster.this' | grep backup_subnet_cidr
 ```
+
+### Adding anchors, or reusing existing ones
+
+Both anchor maps are empty by default. To have this blueprint create them:
+
+```hcl
+azure_resource_anchors = {
+  anchor1 = { name = "anchor-oracle-prod" }
+}
+
+azure_network_anchors = {
+  netanchor1 = {
+    name       = "netanchor-prod"
+    anchor_ref = "anchor1"     # key in azure_resource_anchors
+    vnet_ref   = "vnet1"       # key in azure_vnets - supplies the delegated subnet
+    zones      = ["2"]
+  }
+}
+```
+
+If a platform team already created the Resource Anchor, give its ID instead and keep
+the same key:
+
+```hcl
+existing_resource_anchor_ids = {
+  anchor1 = "/subscriptions/.../providers/Oracle.Database/resourceAnchors/anchor-oracle-prod"
+}
+
+azure_resource_anchors = {}          # anchor1 is not created - it already exists
+azure_network_anchors = {
+  netanchor1 = { name = "netanchor-prod", anchor_ref = "anchor1", vnet_ref = "vnet1" }
+}
+```
+
+Managed and existing anchors share one keyspace, so `anchor_ref` resolves the same way
+whichever side an anchor lives on, and the two can be mixed. A key present in **both**
+maps is rejected before apply by a `check` block — that combination would create the
+anchor *and* wire everything to the pre-existing one, orphaning what was just built.
+
+Both anchor modules carry `prevent_destroy`. Destroying a Resource Anchor unlinks the
+OCI compartment everything else in the resource group hangs off; destroying a Network
+Anchor cuts the path between the delegated subnet and OCI. To remove one deliberately,
+delete the `lifecycle` block from that module, apply, then destroy.
 
 **Add a whole second stack** in another region: add a `vnet2` to `azure_vnets`, an `infra2` to
 `azure_infras` (with its own `zone`), and a `vmc3` pointing at them. No `.tf` changes — `terraform

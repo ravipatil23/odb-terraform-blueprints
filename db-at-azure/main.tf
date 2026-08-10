@@ -3,7 +3,12 @@
 # Fill in terraform.tfvars and run. Add entries to the maps to scale — no need
 # to edit this file.
 #
-# Flow: VNet (+ delegated subnet) -> Exadata Infrastructure -> VM Cluster
+# Flow: Resource Anchor -> VNet (+ delegated subnet) -> Network Anchor
+#                       -> Exadata Infrastructure -> VM Cluster
+#
+# Anchors are optional: leave azure_resource_anchors / azure_network_anchors empty
+# and this behaves exactly as before. Point at anchors a platform team already
+# created with existing_resource_anchor_ids instead.
 
 terraform {
   required_version = ">= 1.5.0"
@@ -12,12 +17,61 @@ terraform {
       source  = "hashicorp/azurerm"
       version = ">= 4.9.0"
     }
+    # Network Anchors only. azurerm has no native resource for
+    # Oracle.Database/networkAnchors, so that one module goes through azapi.
+    # Declared unconditionally because required_providers cannot be conditional;
+    # with azure_network_anchors empty, nothing is created.
+    azapi = {
+      source  = "Azure/azapi"
+      version = ">= 2.0.0"
+    }
   }
 }
 
 provider "azurerm" {
   features {}
   subscription_id = var.subscription_id
+}
+
+provider "azapi" {
+  subscription_id = var.subscription_id
+}
+
+# ── Resource Anchors ──────────────────────────────────────────────────────────
+# Maps a resource group to an OCI compartment. Foundational: everything else on
+# Database@Azure needs one to exist in the resource group first.
+module "resource_anchor" {
+  source   = "./modules/resource-anchor"
+  for_each = var.azure_resource_anchors
+
+  name                = each.value.name
+  resource_group_name = coalesce(each.value.resource_group_name, var.resource_group_name)
+  tags                = var.tags
+}
+
+# One keyspace covering anchors this blueprint creates and anchors that already
+# exist, so anchor_ref resolves the same way whichever side one lives on.
+#
+# Merged rather than a conditional on purpose: both branches of a ?: are
+# evaluated, so indexing a module for a key that was never created fails even on
+# the branch that is not taken.
+locals {
+  resource_anchor_ids = merge(
+    { for k, m in module.resource_anchor : k => m.id },
+    var.existing_resource_anchor_ids,
+  )
+}
+
+# A key defined in both maps would create the anchor *and* wire everything to the
+# pre-existing one, orphaning what was just built. Catch it before apply.
+check "no_duplicate_resource_anchor_keys" {
+  assert {
+    condition = length(setintersection(keys(var.azure_resource_anchors), keys(var.existing_resource_anchor_ids))) == 0
+    error_message = format(
+      "These keys appear in both azure_resource_anchors and existing_resource_anchor_ids: %s. Keep each anchor in one map only - describe it to create it, or give its ID to reuse it.",
+      join(", ", setintersection(keys(var.azure_resource_anchors), keys(var.existing_resource_anchor_ids))),
+    )
+  }
 }
 
 # ── VNets + delegated subnets ─────────────────────────────────────────────────
@@ -34,6 +88,35 @@ module "vnet" {
   tags                  = var.tags
 }
 
+# ── Network Anchors ───────────────────────────────────────────────────────────
+# Bridges a delegated subnet to OCI. anchor_ref must match a key in
+# azure_resource_anchors or existing_resource_anchor_ids; vnet_ref a key in
+# azure_vnets.
+module "network_anchor" {
+  source   = "./modules/network-anchor"
+  for_each = var.azure_network_anchors
+
+  subscription_id     = var.subscription_id
+  name                = each.value.name
+  resource_group_name = coalesce(each.value.resource_group_name, var.resource_group_name)
+  location            = coalesce(each.value.location, var.location)
+  resource_anchor_id  = local.resource_anchor_ids[each.value.anchor_ref]
+  subnet_id           = module.vnet[each.value.vnet_ref].subnet_id
+  zones               = each.value.zones
+  tags                = var.tags
+
+  oci_vcn_dns_label     = each.value.oci_vcn_dns_label
+  oci_backup_cidr_block = each.value.oci_backup_cidr_block
+
+  dns_listening_endpoint_enabled  = each.value.dns_listening_endpoint_enabled
+  dns_listening_allowed_cidrs     = each.value.dns_listening_allowed_cidrs
+  dns_forwarding_endpoint_enabled = each.value.dns_forwarding_endpoint_enabled
+  dns_forwarding_rules            = each.value.dns_forwarding_rules
+  dns_zone_sync_enabled           = each.value.dns_zone_sync_enabled
+
+  depends_on = [module.vnet]
+}
+
 # ── Exadata Infrastructures ───────────────────────────────────────────────────
 module "exadata_infra" {
   source   = "./modules/exadata-infra"
@@ -48,6 +131,10 @@ module "exadata_infra" {
   storage_count       = each.value.storage_count
   zone                = each.value.zone
   tags                = var.tags
+
+  # Nothing on the infra takes the anchor's ID, but the anchor must exist in the
+  # resource group first. With no anchors configured this is a no-op.
+  depends_on = [module.resource_anchor]
 }
 
 # ── VM Clusters ───────────────────────────────────────────────────────────────

@@ -16,7 +16,6 @@ between that environment's Exadata VCN and the shared DNS Hub VCN:
 | 2 | `oci_dns_resolver_endpoint` (forwarding) | Forwarding endpoint on the Exadata VCN resolver — egress queries from the databases. |
 | 3 | `oci_dns_resolver` rule (`FORWARD`) | Sends the configured Azure domains to the Hub **listening** endpoint, so databases resolve Azure FQDNs. |
 | 4 | `oci_core_network_security_group_security_rule` | Opens DNS (UDP/TCP 53) across the peering. |
-| 5 | `oci_core_default_route_table` *(optional)* | Routes the resolver subnets to each other over the LPG pair. |
 
 The **root module** additionally owns the hub-side shared objects:
 the **listening** endpoint (which Azure queries), the **forwarding** endpoint,
@@ -49,26 +48,83 @@ After apply, point Azure's DNS forwarding ruleset at the hub listener:
 terraform output hub_listening_endpoint_ip
 ```
 
-## Routing note
+## Routing — manual, by design
 
-DNS packets must route between the two resolver subnets over the LPG pair.
+**Terraform does not manage route tables here.** It creates the LPG pair, the
+resolver endpoints, the forwarding rules and the NSG rules; the two route rules
+that carry DNS traffic over the LPGs are added by hand, once, after `apply`.
 
-- If the resolver subnets use **dedicated** route tables you manage elsewhere,
-  add a rule on each: *destination = peer resolver subnet CIDR, target = the
-  LPG on that side* (LPG OCIDs are in the `links` output). Leave
-  `manage_route_tables = false`.
-- If they use each VCN's **default** route table and you want Terraform to own
-  it, set `manage_route_tables = true`, supply `*_route_table_id`, and import
-  the existing default route tables first:
+This is deliberate. Managing them would mean `oci_core_default_route_table` with
+`manage_default_resource_id`, which makes Terraform **authoritative** over the
+whole table — every rule not in the config is deleted on the next apply. On an
+Exadata VCN those rules belong to Oracle, are not reliably enumerable, and can be
+added *after* you import, so a later apply would silently remove live routes. An
+earlier version offered this behind a `manage_route_tables` flag; it was removed.
 
-  ```bash
-  terraform import 'module.link["prod"].oci_core_default_route_table.exadata[0]' <prod-default-rt-ocid>
-  terraform import 'module.link["prod"].oci_core_default_route_table.hub[0]'     <hub-default-rt-ocid>
-  ```
+### The two rules
 
-  Then copy any pre-existing routes from `terraform state show` into the
-  `route_rules` blocks in `modules/exadata-dns-link/main.tf` so they aren't
-  dropped on the next apply.
+One per side, mirroring each other. Both point at the LPG on their own side and
+target the peer's resolver subnet:
+
+| Add to | Destination | Target |
+|--------|-------------|--------|
+| **Exadata** VCN route table (the one the resolver subnet uses) | Hub resolver subnet CIDR | Exadata-side LPG |
+| **Hub** VCN route table (the one the hub resolver subnet uses) | Exadata resolver subnet CIDR | Hub-side LPG |
+
+If the resolver subnets use dedicated route tables you own, add the rules there.
+If they use the VCN default route table, add them there — either way, add rather
+than replace, so existing routes survive.
+
+### Getting the values
+
+The LPG OCIDs are outputs:
+
+```bash
+terraform output -json links | jq -r 'to_entries[] |
+  "\(.key): exadata_lpg=\(.value.exadata_lpg_id) hub_lpg=\(.value.hub_lpg_id)"'
+```
+
+The CIDRs are the ones you supplied: `hub_resolver_subnet_cidr` and each
+environment's `resolver_subnet_cidr` in `terraform.tfvars`.
+
+### Adding them
+
+Console: **Networking → VCN → Route Tables → the resolver subnet's table → Add
+Route Rules**, target type *Local Peering Gateway*.
+
+CLI — read the existing rules first and append, since `--route-rules` **replaces**
+the whole list:
+
+```bash
+# 1. Current rules, so nothing is lost
+oci network route-table get --rt-id <exadata-rt-ocid>   --query 'data."route-rules"' > exadata-rules.json
+
+# 2. Append the DNS rule, then apply the combined list
+oci network route-table update --rt-id <exadata-rt-ocid>   --route-rules file://exadata-rules-with-dns.json
+
+# 3. Same on the hub side, with the peer CIDR and the hub LPG
+```
+
+A rule looks like:
+
+```json
+{
+  "destination": "<peer resolver subnet CIDR>",
+  "destinationType": "CIDR_BLOCK",
+  "networkEntityId": "<LPG OCID on this side>",
+  "description": "DNS to peer resolver subnet via LPG"
+}
+```
+
+### Checking it worked
+
+```bash
+terraform output -json links | jq -r '.[].peering_status'   # expect PEERED
+```
+
+`PEERED` only means the LPGs are connected — it does not confirm the routes
+exist. Resolve a database FQDN from an Azure host, or a private Azure name from a
+database node, to confirm traffic actually flows.
 
 ## Adding another environment
 

@@ -167,43 +167,16 @@ resource "oci_core_network_security_group_security_rule" "exadata_dns_ingress_tc
 }
 
 # ── Routing over the LPG pair ────────────────────────────────────────────────
-# DNS packets must route between the two resolver subnets via the LPGs.
-# When the resolver subnets use their VCN's DEFAULT route table, let the
-# module manage it. Import the existing default route tables first:
+# DNS packets must route between the two resolver subnets over the LPG pair, but
+# this module does NOT manage route tables. Add the two rules by hand after apply
+# - see "Routing" in the README for the exact values and CLI commands.
 #
-#   terraform import \
-#     'module.<env>.oci_core_default_route_table.exadata[0]' <exadata-default-rt-ocid>
-#   terraform import \
-#     'module.<env>.oci_core_default_route_table.hub[0]'     <hub-default-rt-ocid>
+# It used to offer to manage each VCN's default route table behind a
+# manage_route_tables flag. That was removed: oci_core_default_route_table with
+# manage_default_resource_id makes Terraform authoritative over the table, so any
+# rule not in the config is deleted on the next apply. On an Exadata VCN those
+# rules belong to Oracle, are not reliably enumerable, and can be added after you
+# import - so a later apply would silently remove live routes.
 #
-# then copy any pre-existing route_rules from `terraform state show` into the
-# blocks below. Set manage_route_tables = false to add the routes by hand.
+# The LPG OCIDs you need are outputs of this module.
 
-resource "oci_core_default_route_table" "exadata" {
-  count                      = var.manage_route_tables ? 1 : 0
-  manage_default_resource_id = var.exadata_route_table_id
-
-  route_rules {
-    network_entity_id = oci_core_local_peering_gateway.exadata.id
-    destination       = var.hub_resolver_subnet_cidr
-    destination_type  = "CIDR_BLOCK"
-    description       = "To DNS Hub resolver subnet via LPG"
-  }
-
-  # ── Pre-existing Exadata VCN routes — paste from `terraform state show` ────
-  # route_rules { destination = "0.0.0.0/0" destination_type = "CIDR_BLOCK" network_entity_id = "<nat/igw-ocid>" }
-}
-
-resource "oci_core_default_route_table" "hub" {
-  count                      = var.manage_route_tables ? 1 : 0
-  manage_default_resource_id = var.hub_route_table_id
-
-  route_rules {
-    network_entity_id = oci_core_local_peering_gateway.hub.id
-    destination       = var.exadata_resolver_subnet_cidr
-    destination_type  = "CIDR_BLOCK"
-    description       = "To ${var.env_name} Exadata resolver subnet via LPG"
-  }
-
-  # ── Pre-existing Hub VCN routes — paste from `terraform state show` ────────
-}

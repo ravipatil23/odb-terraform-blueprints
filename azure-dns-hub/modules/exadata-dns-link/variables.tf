@@ -30,12 +30,6 @@ variable "hub_resolver_nsg_id" {
   description = "OCID of the NSG attached to the Hub resolver endpoints (DNS ingress is opened here)."
 }
 
-variable "hub_route_table_id" {
-  type        = string
-  default     = null
-  description = "OCID of the Hub VCN default route table. Required when manage_route_tables = true."
-}
-
 # ── Exadata VCN (this environment's spoke) ───────────────────────────────────
 
 variable "exadata_vcn_id" {
@@ -65,12 +59,6 @@ variable "exadata_resolver_nsg_id" {
   description = "Optional NSG OCID for the Exadata forwarding endpoint. When set, DNS ingress from the hub is opened on it."
 }
 
-variable "exadata_route_table_id" {
-  type        = string
-  default     = null
-  description = "OCID of the Exadata VCN default route table. Required when manage_route_tables = true."
-}
-
 # ── DNS forwarding behaviour ─────────────────────────────────────────────────
 
 variable "azure_forward_domains" {
@@ -79,8 +67,3 @@ variable "azure_forward_domains" {
   default     = ["azure.com", "windows.net"]
 }
 
-variable "manage_route_tables" {
-  type        = bool
-  default     = false
-  description = "When true, Terraform manages the VCN default route tables (import required). When false, add the LPG routes manually."
-}

@@ -116,14 +116,11 @@ module "link" {
   hub_listening_endpoint_ip = oci_dns_resolver_endpoint.hub_listening.listening_address
   hub_resolver_subnet_cidr  = var.hub_resolver_subnet_cidr
   hub_resolver_nsg_id       = var.hub_resolver_nsg_id
-  hub_route_table_id        = var.hub_route_table_id
 
   exadata_vcn_id               = each.value.vcn_id
   exadata_resolver_subnet_id   = each.value.resolver_subnet_id
   exadata_resolver_subnet_cidr = each.value.resolver_subnet_cidr
   exadata_resolver_nsg_id      = each.value.resolver_nsg_id
-  exadata_route_table_id       = each.value.route_table_id
 
   azure_forward_domains = var.azure_forward_domains
-  manage_route_tables   = var.manage_route_tables
 }

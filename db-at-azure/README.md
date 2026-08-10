@@ -405,6 +405,18 @@ whichever side an anchor lives on, and the two can be mixed. A key present in **
 maps is rejected before apply by a `check` block — that combination would create the
 anchor *and* wire everything to the pre-existing one, orphaning what was just built.
 
+#### Anchor gotchas
+
+- **The Resource Anchor takes no `location`.** It inherits its region from the resource
+  group, and `location` comes back as an output rather than an input.
+- **The Network Anchor's API version is pinned** to `2025-09-01` in
+  `modules/network-anchor/main.tf`. Bump it there if you need a newer one.
+- **Renaming a map key destroys and recreates that anchor** — the key is its Terraform
+  identity. Given both carry `prevent_destroy`, a rename fails the plan rather than
+  quietly rebuilding, which is the intended outcome.
+- A Network Anchor is required for an Oracle **Base Database**, not for Exadata VM
+  clusters on their own.
+
 Both anchor modules carry `prevent_destroy`. Destroying a Resource Anchor unlinks the
 OCI compartment everything else in the resource group hangs off; destroying a Network
 Anchor cuts the path between the delegated subnet and OCI. To remove one deliberately,

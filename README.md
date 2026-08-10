@@ -8,12 +8,8 @@ These are plain `.tf` files you copy and run — no code generation, no framewor
 ```
   # ── Provision the cloud infrastructure (network → infra → VM cluster) ──
   db-at-aws/                Oracle Database@AWS    (ODB Network → Exadata Infra → VM Cluster, + optional peering)
-  db-at-azure/              Oracle Database@Azure  (VNet → Exadata Infra → VM Cluster)
+  db-at-azure/              Oracle Database@Azure  (optional Resource/Network Anchor → VNet → Exadata Infra → VM Cluster)
   db-at-gcp/                Oracle Database@GCP    (ODB Network → Exadata Infra → VM Cluster)
-
-  # ── Database@Azure prerequisites ──
-  azure-resource-anchor/    Resource Anchor (foundational prerequisite for Database@Azure)
-  azure-network-anchor/     Network Anchor  (Oracle.Database/networkAnchors via azapi)
 
   # ── Layer the database on an existing VM cluster ──
   oci-database/             DB Home → CDB → optional PDB (oracle/oci)
@@ -62,9 +58,8 @@ terraform apply
 |-----------|----------|---------|
 | db-at-aws | `hashicorp/aws`     | `>= 6.15.0` |
 | db-at-azure | `hashicorp/azurerm` | `>= 4.9.0`  |
+| db-at-azure (Network Anchors) | `Azure/azapi` | `>= 2.0.0` |
 | db-at-gcp | `hashicorp/google`  | `>= 6.0.0`  |
-| azure-network-anchor | `Azure/azapi` | `>= 2.0.0` |
-| azure-resource-anchor | `hashicorp/azurerm` | `>= 4.9.0` |
 | oci-database | `oracle/oci` | `>= 6.0.0` |
 | multi-az-dataguard | `oracle/oci` | `>= 6.0.0` |
 | cross-region-dataguard | `oracle/oci` | `>= 6.0.0` |

@@ -32,8 +32,6 @@ jobs:
           - db-at-aws
           - db-at-azure
           - db-at-gcp
-          - azure-network-anchor
-          - azure-resource-anchor
           - oci-database
           - multi-az-dataguard
           - cross-region-dataguard

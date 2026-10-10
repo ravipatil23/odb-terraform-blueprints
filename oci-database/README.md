@@ -45,7 +45,7 @@ by editing **only `terraform.tfvars`** (passwords go in env vars).
 | Network Security Group *(optional)* | `oci_core_network_security_group` + rules | `modules/nsg` | one per `nsgs` entry |
 | DNS forwarder *(optional)* | `oci_dns_resolver_endpoint` + resolver `rules` | `modules/dns-forwarder` | one per `dns_forwarders` entry |
 
-**Provider:** `oracle/oci >= 6.0.0` · **Terraform:** `>= 1.5.0` (or OpenTofu `>= 1.6.0`).
+**Provider:** `oracle/oci >= 7.11.0` · **Terraform:** `>= 1.5.0` (or OpenTofu `>= 1.6.0`).
 
 The NSGs and DNS forwarders are **independent of the database chain** — no `depends_on`, so they
 apply in parallel with the homes rather than after them. Leave `nsgs` and `dns_forwarders` empty and

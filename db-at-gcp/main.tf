@@ -16,11 +16,10 @@ terraform {
   required_providers {
     google = {
       source = "hashicorp/google"
-      # 7.0 is the first release carrying odb_network / odb_subnet on
-      # google_oracle_database_autonomous_database. Provider requirements are
-      # static, so this floor applies even when gcp_autonomous_dbs is empty —
-      # the Exadata side of the blueprint is unaffected either way.
-      version = ">= 7.0.0"
+      # 7.5 is the first release carrying gcp_oracle_zone on
+      # google_oracle_database_odb_network (7.0 added odb_network / odb_subnet on
+      # google_oracle_database_autonomous_database). Verified by CI's floor job.
+      version = ">= 7.5.0"
     }
   }
 }

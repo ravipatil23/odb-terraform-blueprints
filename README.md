@@ -251,19 +251,19 @@ Timing notes:
 
 | Blueprint | Provider | Version |
 |-----------|----------|---------|
-| db-at-aws | `hashicorp/aws`     | `>= 6.15.0` |
-| db-at-azure | `hashicorp/azurerm` | `>= 4.9.0`  |
-| db-at-azure (Network Anchors) | `Azure/azapi` | `>= 2.0.0` |
-| db-at-gcp | `hashicorp/google`  | `>= 7.0.0`  |
-| oci-database | `oracle/oci` | `>= 6.0.0` |
+| db-at-aws | `hashicorp/aws`     | `>= 6.42.0` |
+| db-at-azure | `hashicorp/azurerm` | `>= 4.51.0` |
+| db-at-azure (Network Anchors) | `Azure/azapi` | `>= 2.8.0` |
+| db-at-gcp | `hashicorp/google`  | `>= 7.5.0`  |
+| oci-database | `oracle/oci` | `>= 7.11.0` |
 | multi-az-dataguard | `oracle/oci` | `>= 6.0.0` |
 | cross-region-dataguard | `oracle/oci` | `>= 6.0.0` |
 | azure-dns-hub | `oracle/oci` | `>= 6.0.0` |
 
-`db-at-gcp` moved from `>= 6.0.0` to `>= 7.0.0` when Autonomous support landed: 7.0 is the first
-release carrying `odb_network` / `odb_subnet` on `google_oracle_database_autonomous_database`.
-Provider requirements are static, so the floor applies even with `gcp_autonomous_dbs` empty. The
-Exadata side of that blueprint is unaffected.
+Each floor is the oldest release the blueprint actually validates against — CI's **floor** job
+(see [CI](#ci)) pins exactly these versions, so raise the floor whenever a blueprint starts using a
+newer argument. Provider requirements are static, so a floor applies even when the map that needs
+the newer argument is empty.
 
 Terraform `>= 1.5.0` (or OpenTofu `>= 1.6.0`) — the map variables use optional object attributes.
 
@@ -285,3 +285,25 @@ See each blueprint's own `README.md` for cloud-specific notes and gotchas.
 its own root module. No cloud credentials are needed: `-backend=false` skips state, and
 `validate` only needs the providers that `init` pulls from the registry.
 
+Each blueprint is validated twice:
+
+- **latest** — a plain `init`. Constraints are floor-only and lock files are not committed, so
+  this is the newest provider a user copying the blueprint would get today.
+- **floor** — Terraform `1.5.0` and every provider pinned to the blueprint's declared `>= X`
+  (via [`.github/scripts/pin_floor.py`](.github/scripts/pin_floor.py)), so the table above stays true.
+
+### Keeping up with provider releases
+
+Two scheduled jobs run every Monday, so provider releases surface even when nobody pushes:
+
+- **`validate.yml`** re-runs the matrix above. If a new release breaks a blueprint (latest) or a
+  blueprint quietly depends on something newer than its floor, it opens a `provider-drift` issue,
+  or comments on the open one.
+- **`provider-schemas.yml`** regenerates [`.github/provider-schemas/`](.github/provider-schemas/):
+  one line per argument of every resource and data source the blueprints use, plus whole Oracle
+  families (`aws_odb_*`, `azurerm_oracle_*`, `google_oracle_database_*`) so new resources appear.
+  If anything changed, it opens a pull request whose diff *is* the changelog — new arguments,
+  `DEPRECATED` markers, newly `required` arguments, removals. Merge it to accept the new baseline,
+  then expose anything useful in the blueprint in a normal pull request.
+
+To refresh the snapshots locally: `python .github/scripts/provider_schemas.py [aws azurerm google oci]`.

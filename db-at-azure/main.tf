@@ -15,7 +15,7 @@ terraform {
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
-      version = ">= 4.9.0"
+      version = ">= 4.51.0"
     }
     # Network Anchors only. azurerm has no native resource for
     # Oracle.Database/networkAnchors, so that one module goes through azapi.
@@ -23,7 +23,7 @@ terraform {
     # with azure_network_anchors empty, nothing is created.
     azapi = {
       source  = "Azure/azapi"
-      version = ">= 2.0.0"
+      version = ">= 2.8.0"
     }
   }
 }

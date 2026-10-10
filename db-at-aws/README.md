@@ -64,7 +64,7 @@ That is the **recommended operational order** — the sequence to follow and ver
 not enforce all of it; see [§6.1](#61-order-of-operations) for what the dependency graph actually
 guarantees.
 
-**Provider:** `hashicorp/aws >= 6.15.0` · **Terraform:** `>= 1.5.0` (or OpenTofu `>= 1.6.0`).
+**Provider:** `hashicorp/aws >= 6.42.0` · **Terraform:** `>= 1.5.0` (or OpenTofu `>= 1.6.0`).
 
 ---
 

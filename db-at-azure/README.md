@@ -81,7 +81,7 @@ takes ([§6.2](#62-provisioning-time)).
 The ADMIN password is the one input that never goes in `terraform.tfvars`; it comes from
 `TF_VAR_autonomous_db_admin_passwords` at apply time — see [§7.5](#75-azure_autonomous_dbs).
 
-**Providers:** `hashicorp/azurerm >= 4.9.0`, plus `Azure/azapi >= 2.0.0` for Network
+**Providers:** `hashicorp/azurerm >= 4.51.0`, plus `Azure/azapi >= 2.8.0` for Network
 Anchors only — `azurerm` has no native resource for `Oracle.Database/networkAnchors`.
 `required_providers` cannot be conditional, so azapi is always declared; with no
 network anchors configured, nothing is created through it.

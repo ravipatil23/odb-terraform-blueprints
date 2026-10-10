@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""Snapshot the provider schemas the blueprints depend on.
+
+For each provider, downloads its latest release, dumps `terraform providers
+schema -json`, and writes one line per argument/attribute to
+.github/provider-schemas/<provider>.txt. Committing those files means a
+provider release that adds, removes, deprecates or changes an argument shows
+up as a plain diff in a pull request.
+
+What is watched, per provider:
+  * every resource / data source family named in WATCH (catches new resources), and
+  * every resource / data source type the blueprints actually use (found by
+    scanning the repo, so new templates are picked up automatically).
+
+Usage: provider_schemas.py            (run from the repo root)
+Prints "<provider>=<version>" lines for the workflow to put in the PR body.
+"""
+import json
+import pathlib
+import re
+import subprocess
+import sys
+import tempfile
+
+REPO = pathlib.Path(__file__).resolve().parents[2]
+OUT = REPO / ".github" / "provider-schemas"
+
+# local name -> (registry source, type prefixes watched as whole families)
+WATCH = {
+    "aws": ("hashicorp/aws", ["aws_odb_"]),
+    "azurerm": ("hashicorp/azurerm", ["azurerm_oracle_"]),
+    "google": ("hashicorp/google", ["google_oracle_database_"]),
+    "oci": ("oracle/oci", []),  # oci_database_* is hundreds of types; only track what we use
+}
+
+USED = re.compile(r'^\s*(resource|data)\s+"([a-z0-9_]+)"', re.MULTILINE)
+
+
+def used_types():
+    found = set()
+    for tf in REPO.rglob("*.tf"):
+        if ".terraform" in tf.parts:
+            continue
+        for kind, name in USED.findall(tf.read_text(encoding="utf-8")):
+            found.add((kind, name))
+    return found
+
+
+def flag(attr):
+    if attr.get("required"):
+        f = "required"
+    elif attr.get("optional") and attr.get("computed"):
+        f = "optional+computed"
+    elif attr.get("optional"):
+        f = "optional"
+    else:
+        f = "computed"
+    if attr.get("sensitive"):
+        f += ", sensitive"
+    if attr.get("deprecated"):
+        f += ", DEPRECATED"
+    return f
+
+
+def walk_attributes(path, attributes, out):
+    for name, attr in attributes.items():
+        if "nested_type" in attr:
+            nested = attr["nested_type"]
+            out.append(f"{path}.{name}: {nested.get('nesting_mode')} nested, {flag(attr)}")
+            walk_attributes(f"{path}.{name}", nested.get("attributes", {}), out)
+        else:
+            kind = json.dumps(attr.get("type"), separators=(",", ":"))
+            out.append(f"{path}.{name}: {kind}, {flag(attr)}")
+
+
+def walk_block(path, block, out):
+    walk_attributes(path, block.get("attributes", {}), out)
+    for name, nested in block.get("block_types", {}).items():
+        bounds = f"{nested.get('min_items', 0)}..{nested.get('max_items') or '*'}"
+        out.append(f"{path}.{name}: block {nested.get('nesting_mode')} [{bounds}]")
+        walk_block(f"{path}.{name}", nested.get("block", {}), out)
+
+
+def snapshot(local, source, prefixes, used):
+    with tempfile.TemporaryDirectory() as tmp:
+        pathlib.Path(tmp, "main.tf").write_text(
+            f'terraform {{\n  required_providers {{\n    {local} = {{ source = "{source}" }}\n  }}\n}}\n',
+            encoding="utf-8",
+        )
+        subprocess.run(["terraform", "init", "-backend=false", "-input=false", "-no-color"],
+                       cwd=tmp, check=True, stdout=subprocess.DEVNULL)
+        raw = subprocess.run(["terraform", "providers", "schema", "-json"],
+                             cwd=tmp, check=True, capture_output=True, encoding="utf-8").stdout
+        version = subprocess.run(["terraform", "version", "-json"],
+                                 cwd=tmp, check=True, capture_output=True, encoding="utf-8").stdout
+
+    schema = json.loads(raw)["provider_schemas"][f"registry.terraform.io/{source}"]
+    version = json.loads(version)["provider_selections"][f"registry.terraform.io/{source}"]
+
+    def watched(kind, name):
+        return (kind, name) in used or any(name.startswith(p) for p in prefixes)
+
+    lines = []
+    for kind, key in (("resource", "resource_schemas"), ("data", "data_source_schemas")):
+        for name in sorted(schema.get(key, {})):
+            if watched(kind, name):
+                prefix = name if kind == "resource" else f"data.{name}"
+                lines.append(f"{prefix}")
+                body = []
+                walk_block(prefix, schema[key][name]["block"], body)
+                lines.extend(f"  {line}" for line in sorted(body))
+
+    keys = {"resource": "resource_schemas", "data": "data_source_schemas"}
+    for kind, name in sorted(used):
+        if name.startswith(f"{local}_") and name not in schema.get(keys[kind], {}):
+            label = name if kind == "resource" else f"data.{name}"
+            lines.append(f"{label}: REMOVED from provider (still used by a blueprint)")
+
+    header = [f"# {source}: watched resources and data sources, one line per argument.",
+              "# Generated by .github/scripts/provider_schemas.py — do not edit by hand.", ""]
+    (OUT / f"{local}.txt").write_text("\n".join(header + lines) + "\n", encoding="utf-8")
+    return version
+
+
+def main():
+    OUT.mkdir(parents=True, exist_ok=True)
+    used = used_types()
+    only = set(sys.argv[1:])
+    for local, (source, prefixes) in WATCH.items():
+        if only and local not in only:
+            continue
+        print(f"{local}={snapshot(local, source, prefixes, used)}", flush=True)
+
+
+if __name__ == "__main__":
+    main()

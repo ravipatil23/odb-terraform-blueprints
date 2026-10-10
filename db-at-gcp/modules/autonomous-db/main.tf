@@ -2,9 +2,9 @@ terraform {
   required_providers {
     google = {
       source = "hashicorp/google"
-      # 7.0 is the first release carrying odb_network / odb_subnet on
-      # google_oracle_database_autonomous_database.
-      version = ">= 7.0.0"
+      # 7.0 added odb_network / odb_subnet on google_oracle_database_autonomous_database;
+      # the blueprint as a whole needs 7.5 (gcp_oracle_zone on the ODB network).
+      version = ">= 7.5.0"
     }
   }
 }

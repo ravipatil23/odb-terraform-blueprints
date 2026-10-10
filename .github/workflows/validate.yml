@@ -2,13 +2,29 @@ name: Validate Terraform Blueprints
 
 # Keeps the reusable Oracle Database@Cloud blueprints formatted and valid as they
 # evolve. Every blueprint is a root module, so each is validated on its own.
+#
+# Each blueprint is validated twice:
+#   latest — a plain init. Constraints are floor-only (">= X") and lock files are
+#            not committed, so this is the newest provider a user would get today.
+#   floor  — Terraform and every provider pinned to the minimum the blueprint
+#            declares, proving the stated ">= X" is still true.
+#
+# The weekly schedule catches provider releases that break a blueprint even when
+# nobody has pushed; a scheduled failure opens (or updates) a GitHub issue.
 
 on:
   push:
   pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+env:
+  # Minimum Terraform the blueprints declare (required_version = ">= 1.5.0").
+  TERRAFORM_FLOOR: "1.5.0"
 
 jobs:
   fmt:
@@ -23,11 +39,12 @@ jobs:
         run: terraform fmt -check -recursive .
 
   validate:
-    name: terraform validate (${{ matrix.dir }})
+    name: validate ${{ matrix.versions }} (${{ matrix.dir }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
+        versions: [latest, floor]
         dir:
           - db-at-aws
           - db-at-azure
@@ -49,10 +66,46 @@ jobs:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v3
         with:
+          terraform_version: ${{ matrix.versions == 'floor' && env.TERRAFORM_FLOOR || 'latest' }}
           terraform_wrapper: false
+      - name: Pin providers to their declared minimums
+        if: matrix.versions == 'floor'
+        run: python3 "$GITHUB_WORKSPACE/.github/scripts/pin_floor.py" .
       # No cloud credentials needed: -backend=false skips state, and validate only
       # needs the providers, which init downloads from the registry.
       - name: terraform init
         run: terraform init -backend=false -input=false
+      - name: Provider versions under test
+        run: terraform version
       - name: terraform validate
         run: terraform validate -no-color
+
+  report:
+    name: Open issue on scheduled failure
+    needs: [fmt, validate]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the provider-drift issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create provider-drift --color D93F0B \
+            --description "A provider release broke a blueprint" 2>/dev/null || true
+          body="The scheduled validation failed: $RUN_URL
+
+          A **latest** failure means a new provider release broke a blueprint.
+          A **floor** failure means a blueprint now uses something newer than its
+          declared \`version = \">= X\"\` — raise the floor."
+          existing=$(gh issue list --label provider-drift --state open \
+            --search "in:title validation" --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "Scheduled validation failed against provider releases" \
+              --label provider-drift --body "$body"
+          fi

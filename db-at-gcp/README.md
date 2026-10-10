@@ -83,12 +83,12 @@ this blueprint deploys **only** Autonomous databases, in a fraction of the time
 The ADMIN password is the one input that never goes in `terraform.tfvars`; it comes from
 `TF_VAR_gcp_adb_admin_passwords` at apply time — see [§7.6](#76-gcp_autonomous_dbs).
 
-**Provider:** `hashicorp/google >= 7.0.0` · **Terraform:** `>= 1.5.0` (or OpenTofu `>= 1.6.0`).
+**Provider:** `hashicorp/google >= 7.5.0` · **Terraform:** `>= 1.5.0` (or OpenTofu `>= 1.6.0`).
 
-> The floor was `>= 6.0.0` before Autonomous support landed. 7.0 is the first release carrying
-> `odb_network` / `odb_subnet` on `google_oracle_database_autonomous_database`, and provider
-> requirements are static — the constraint applies even when `gcp_autonomous_dbs` is empty. The
-> Exadata side of the blueprint is unaffected either way.
+> 7.5 is the first release carrying `gcp_oracle_zone` on `google_oracle_database_odb_network`;
+> 7.0 added `odb_network` / `odb_subnet` on `google_oracle_database_autonomous_database`. Provider
+> requirements are static, so the floor applies whichever resources you enable. CI's **floor** job
+> validates the blueprint against exactly this version.
 
 ---
 

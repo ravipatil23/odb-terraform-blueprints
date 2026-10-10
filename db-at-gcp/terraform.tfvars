@@ -95,3 +95,86 @@ gcp_vm_clusters = {
     # labels                   = { env = "prod" }
   }
 }
+
+# ── ODB Networks — Autonomous AI Database Serverless only (optional) ──────────
+# Same as gcp_odb_networks above, minus the backup subnet: an Autonomous
+# Database never uses one. A VM Cluster cannot reference a network from this
+# map — it needs a backup subnet.
+#
+# Only worth using when a network serves Autonomous databases alone. An ADB can
+# just as well point at a key in gcp_odb_networks and share a network with your
+# VM clusters. Keys share one namespace across both maps; a key in both is
+# rejected before apply.
+#
+# gcp_odb_networks_adbs = {
+#   adbnet1 = {
+#     odb_network_id    = "odbnet-adb-prod"
+#     network           = "projects/my-gcp-project/global/networks/default"
+#     client_subnet_id  = "odb-client-adb-prod"
+#     client_cidr_range = "10.30.2.0/24"
+#
+#     # ── optional (defaults shown) ──
+#     # location            = ""                # region override (defaults to gcp_region)
+#     # project             = ""                # project override (defaults to gcp_project)
+#     # gcp_oracle_zone     = "us-east4-b-r1"   # Oracle zone within the region
+#     # deletion_protection = true
+#     # labels              = { env = "prod" }
+#   }
+# }
+
+# ── Autonomous AI Databases — Serverless (optional) ───────────────────────────
+# Nothing here depends on gcp_exadata_infras or gcp_vm_clusters: Oracle runs the
+# fleet, so there is no Exadata Infrastructure or VM Cluster underneath and no
+# infra_key. You can leave those two maps empty and deploy only Autonomous
+# databases — minutes rather than the hours a VM cluster takes.
+#
+# network_key matches a key in EITHER gcp_odb_networks or gcp_odb_networks_adbs.
+# The database is regional: it takes no gcp_oracle_zone.
+#
+# The ADMIN password is never written here. Export it before you apply, keyed by
+# the same map key:
+#
+#   export TF_VAR_gcp_adb_admin_passwords='{"adb1":"YourStr0ngPass"}'
+#
+#   PowerShell:
+#   $env:TF_VAR_gcp_adb_admin_passwords = '{"adb1":"YourStr0ngPass"}'
+#
+# 12-30 chars, upper + lower + digit, no double quote, cannot contain "admin".
+#
+# gcp_autonomous_dbs = {
+#   adb1 = {
+#     autonomous_database_id = "adb-prod"       # immutable, max 63 chars
+#     database               = "adbprod"        # Oracle DB name, max 30 alphanumeric
+#     network_key            = "net1"           # or "adbnet1" from the map above
+#
+#     # ── optional (defaults shown) ──
+#     # display_name                    = ""        # falls back to autonomous_database_id
+#     # location                        = ""        # region override
+#     # project                         = ""        # project override
+#     # db_workload                     = "OLTP"    # or DW, AJD, APEX
+#     # license_type                    = "LICENSE_INCLUDED"   # or BRING_YOUR_OWN_LICENSE
+#     # db_edition                      = "ENTERPRISE_EDITION" # or STANDARD_EDITION
+#     # db_version                      = "23ai"    # or 19c
+#     # compute_count                   = 2         # ECPUs, minimum 2
+#     # data_storage_size_gb            = 120
+#     # is_auto_scaling_enabled         = true      # burst to 3x compute_count
+#     # is_storage_auto_scaling_enabled = false
+#     # backup_retention_period_days    = 60        # 1-60
+#     # maintenance_schedule_type       = "REGULAR" # EARLY patches a week ahead
+#     # character_set                   = "AL32UTF8"
+#     # n_character_set                 = "AL16UTF16"
+#     # operations_insights_state       = "NOT_ENABLED"  # or ENABLED
+#     # mtls_connection_required        = true      # false allows TLS-only
+#     # private_endpoint_label          = "adbprod" # hostname prefix; empty = Oracle picks
+#     # private_endpoint_ip             = ""        # must sit inside client_cidr_range
+#     # customer_contacts               = ["dba@example.com"]
+#     # deletion_protection             = true
+#     # labels                          = { env = "prod" }
+#   }
+# }
+#
+# NOTE: compute_count, data_storage_size_gb, db_version, db_edition, the two
+# auto-scaling flags and backup_retention_period_days are covered by an
+# ignore_changes guard in modules/autonomous-db — the service rewrites them when
+# it scales. Editing them here produces no plan. To resize deliberately, comment
+# the field out of that lifecycle block, apply, then restore it.

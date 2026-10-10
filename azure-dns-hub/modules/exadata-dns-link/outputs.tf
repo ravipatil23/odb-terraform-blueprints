@@ -1,11 +1,16 @@
 output "exadata_lpg_id" {
-  description = "OCID of the Exadata-side Local Peering Gateway."
-  value       = oci_core_local_peering_gateway.exadata.id
+  description = "OCID of the Exadata-side Local Peering Gateway - created here, or the existing one referenced."
+  value       = local.exadata_lpg_id
 }
 
 output "hub_lpg_id" {
-  description = "OCID of the Hub-side Local Peering Gateway."
-  value       = oci_core_local_peering_gateway.hub.id
+  description = "OCID of the Hub-side Local Peering Gateway - created here, or the existing one referenced."
+  value       = local.hub_lpg_id
+}
+
+output "lpg_managed" {
+  description = "Whether this module created the LPG pair (true) or referenced an existing peering (false)."
+  value       = local.create_lpgs
 }
 
 output "forwarding_endpoint_name" {
@@ -19,6 +24,7 @@ output "forwarding_endpoint_ip" {
 }
 
 output "peering_status" {
-  description = "Status of the Exadata-side LPG peering toward the hub."
-  value       = oci_core_local_peering_gateway.exadata.peering_status
+  description = "Status of the Exadata-side LPG peering toward the hub. \"EXISTING (unmanaged)\" when referencing a pre-existing pair - Terraform does not read its status, so verify it in the console or with the OCI CLI."
+  value       = local.create_lpgs ? oci_core_local_peering_gateway.exadata[0].peering_status : "EXISTING (unmanaged)"
 }
+

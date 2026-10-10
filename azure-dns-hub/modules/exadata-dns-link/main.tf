@@ -40,6 +40,23 @@ locals {
     var.exadata_resolver_id,
     data.oci_core_vcn_dns_resolver_association.exadata.dns_resolver_id,
   )
+
+  # Create the LPG pair only when an existing peering was not supplied. OCI
+  # permits exactly ONE peering between any two VCNs, so if these VCNs are
+  # already joined - by another stack, by the platform, or by hand - creating a
+  # second pair fails at ConnectLocalPeeringGateways with "A peering with VCN
+  # ... has already been established".
+  #
+  # That failure is worse than it looks: CreateLocalPeeringGateway succeeds and
+  # only the connect call fails, so each attempt leaves TWO orphaned gateways
+  # behind - present, unpeered, and counting against the 10-LPG limit on both
+  # VCNs. Retrying strands two more. Referencing the existing pair avoids the
+  # create entirely.
+  create_lpgs = var.existing_hub_lpg_id == null
+
+  hub_lpg_id     = local.create_lpgs ? oci_core_local_peering_gateway.hub[0].id : var.existing_hub_lpg_id
+  exadata_lpg_id = local.create_lpgs ? oci_core_local_peering_gateway.exadata[0].id : var.existing_exadata_lpg_id
+
 }
 
 # Discover the Exadata VCN's system resolver when not supplied explicitly.
@@ -48,9 +65,13 @@ data "oci_core_vcn_dns_resolver_association" "exadata" {
 }
 
 # ── 1:1 Local Peering Gateway pair  (Exadata VCN ⇄ DNS Hub VCN) ──────────────
+#
+# Skipped entirely when existing_hub_lpg_id / existing_exadata_lpg_id are set -
+# see the create_lpgs local above.
 
 # Hub side — acceptor, created first (no peer_id).
 resource "oci_core_local_peering_gateway" "hub" {
+  count          = local.create_lpgs ? 1 : 0
   compartment_id = var.compartment_id
   vcn_id         = var.hub_vcn_id
   display_name   = "${local.prefix}-hub-lpg"
@@ -58,10 +79,11 @@ resource "oci_core_local_peering_gateway" "hub" {
 
 # Exadata side — requester, establishes the peering toward the hub LPG.
 resource "oci_core_local_peering_gateway" "exadata" {
+  count          = local.create_lpgs ? 1 : 0
   compartment_id = var.compartment_id
   vcn_id         = var.exadata_vcn_id
   display_name   = "${local.prefix}-exadata-lpg"
-  peer_id        = oci_core_local_peering_gateway.hub.id
+  peer_id        = oci_core_local_peering_gateway.hub[0].id
 }
 
 # ── FORWARDING endpoint on the Exadata VCN resolver ──────────────────────────
@@ -76,7 +98,6 @@ resource "oci_dns_resolver_endpoint" "exadata_forward" {
   is_listening  = false
 
   # forwarding_address is auto-assigned from the subnet when omitted.
-  nsg_ids = var.exadata_resolver_nsg_id != null ? [var.exadata_resolver_nsg_id] : null
 }
 
 # ── FORWARD rule: Azure domains → Hub LISTENING endpoint ─────────────────────
@@ -94,72 +115,94 @@ resource "oci_dns_resolver" "exadata" {
     destination_addresses  = [var.hub_listening_endpoint_ip]
     qname_cover_conditions = var.azure_forward_domains
   }
+
+  lifecycle {
+    # scope is Optional + ForceNew and does not come back populated on import,
+    # so state ends up empty against a config saying "PRIVATE" and Terraform
+    # plans a REPLACEMENT. The destroy half of that clears this resolver's rules
+    # on the live VCN. resolver_id identifies it on its own, so ignoring scope
+    # drift removes the trigger at no cost. See the root module for detail.
+    ignore_changes = [scope]
+  }
 }
 
 # ── DNS security (UDP/TCP 53) across the peering ─────────────────────────────
-# Hub listener must accept queries originating from the Exadata resolver subnet.
+#
+# THIS MODULE WRITES NOTHING TO THE HUB SIDE. The Network Anchor's own NSG is the
+# anchor's to manage, and the hub resolver subnet's list is the root module's.
+#
+# Here: the DEFAULT security list already attached to this environment's resolver
+# subnet, named as exadata_resolver_security_list_id. Nothing is attached to the
+# resolver endpoint itself - an NSG would have to be, via nsg_ids, tying every
+# rule to an object this module replaces.
+#
+# ⚠ AUTHORITATIVE: what is declared below IS the list after apply. See the root
+#   module and README §8.
+resource "oci_core_default_security_list" "exadata_resolver" {
+  count = var.exadata_resolver_security_list_id != null ? 1 : 0
 
-resource "oci_core_network_security_group_security_rule" "hub_dns_ingress_udp" {
-  network_security_group_id = var.hub_resolver_nsg_id
-  direction                 = "INGRESS"
-  protocol                  = "17" # UDP
-  source                    = var.exadata_resolver_subnet_cidr
-  source_type               = "CIDR_BLOCK"
-  description               = "DNS (UDP) from ${var.env_name} Exadata resolver subnet"
+  manage_default_resource_id = var.exadata_resolver_security_list_id
 
-  udp_options {
-    destination_port_range {
+  # Egress 53 is the rule this side actually needs: the forwarding endpoint is
+  # what initiates, sending the Azure domains up to the hub listener. Broad, like
+  # the hub side - see the root module. Redundant while allow_all_egress is on,
+  # and the one that matters once it is off.
+  egress_security_rules {
+    protocol         = "17" # UDP
+    destination      = "0.0.0.0/0"
+    destination_type = "CIDR_BLOCK"
+    description      = "DNS (UDP)"
+
+    udp_options {
       min = 53
       max = 53
     }
   }
-}
 
-resource "oci_core_network_security_group_security_rule" "hub_dns_ingress_tcp" {
-  network_security_group_id = var.hub_resolver_nsg_id
-  direction                 = "INGRESS"
-  protocol                  = "6" # TCP
-  source                    = var.exadata_resolver_subnet_cidr
-  source_type               = "CIDR_BLOCK"
-  description               = "DNS (TCP) from ${var.env_name} Exadata resolver subnet"
+  egress_security_rules {
+    protocol         = "6" # TCP
+    destination      = "0.0.0.0/0"
+    destination_type = "CIDR_BLOCK"
+    description      = "DNS (TCP)"
 
-  tcp_options {
-    destination_port_range {
+    tcp_options {
       min = 53
       max = 53
     }
   }
-}
 
-# Exadata forwarding endpoint must accept replies / queries from the hub subnet.
-resource "oci_core_network_security_group_security_rule" "exadata_dns_ingress_udp" {
-  count                     = var.exadata_resolver_nsg_id != null ? 1 : 0
-  network_security_group_id = var.exadata_resolver_nsg_id
-  direction                 = "INGRESS"
-  protocol                  = "17" # UDP
-  source                    = var.hub_resolver_subnet_cidr
-  source_type               = "CIDR_BLOCK"
-  description               = "DNS (UDP) from DNS Hub resolver subnet"
+  dynamic "egress_security_rules" {
+    for_each = var.allow_all_egress ? [1] : []
+    content {
+      protocol         = "all"
+      destination      = "0.0.0.0/0"
+      destination_type = "CIDR_BLOCK"
+      description      = "All egress"
+    }
+  }
 
-  udp_options {
-    destination_port_range {
+  # Ingress on 53. The egress rules are stateful, so answers come back without
+  # this - it is here for a hub that queries this VCN's resolver directly rather
+  # than only answering it.
+  ingress_security_rules {
+    protocol    = "17" # UDP
+    source      = "0.0.0.0/0"
+    source_type = "CIDR_BLOCK"
+    description = "DNS (UDP)"
+
+    udp_options {
       min = 53
       max = 53
     }
   }
-}
 
-resource "oci_core_network_security_group_security_rule" "exadata_dns_ingress_tcp" {
-  count                     = var.exadata_resolver_nsg_id != null ? 1 : 0
-  network_security_group_id = var.exadata_resolver_nsg_id
-  direction                 = "INGRESS"
-  protocol                  = "6" # TCP
-  source                    = var.hub_resolver_subnet_cidr
-  source_type               = "CIDR_BLOCK"
-  description               = "DNS (TCP) from DNS Hub resolver subnet"
+  ingress_security_rules {
+    protocol    = "6" # TCP
+    source      = "0.0.0.0/0"
+    source_type = "CIDR_BLOCK"
+    description = "DNS (TCP)"
 
-  tcp_options {
-    destination_port_range {
+    tcp_options {
       min = 53
       max = 53
     }

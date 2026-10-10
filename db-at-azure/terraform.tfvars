@@ -59,6 +59,10 @@ tags = {
 #     # oci_backup_cidr_block = "10.0.2.0/24"   # not needed for Base Database
 #
 #     # ── DNS (all default false) ──
+#     # Leave dns_listening_endpoint_enabled OFF on an anchor that fronts the
+#     # central DNS hub in ../azure-dns-hub - that blueprint creates the hub's
+#     # listening endpoint itself, in a resolver subnet it owns. Enabling it here
+#     # too would put a second, unwired listener on the same resolver.
 #     # dns_listening_endpoint_enabled  = true          # Azure apps resolve DB FQDNs
 #     # dns_listening_allowed_cidrs     = "10.0.0.0/16" # comma-separated
 #     # dns_forwarding_endpoint_enabled = true          # DB instances resolve Azure FQDNs
@@ -141,3 +145,55 @@ azure_clusters = {
   #   ssh_public_keys    = ["ssh-rsa AAAAB3Nza... replace-with-your-key"]
   # }
 }
+
+# ── Autonomous Databases — Serverless (optional) ──────────────────────────────
+# Oracle Autonomous Database Serverless. Nothing here depends on azure_infras or
+# azure_clusters: Oracle runs the fleet, so there is no Exadata Infrastructure or
+# VM Cluster underneath and no infra_ref. You can leave those two maps empty and
+# deploy only Autonomous databases.
+#
+# vnet_ref is a key in azure_vnets and gives a PRIVATE endpoint on the
+# Oracle-delegated subnet. Omit it for a public endpoint and list allowed_ips.
+#
+# The ADMIN password is never written here. Export it before you apply, keyed by
+# the same map key:
+#
+#   export TF_VAR_autonomous_db_admin_passwords='{"adb1":"YourStr0ngPass"}'
+#
+#   PowerShell:
+#   $env:TF_VAR_autonomous_db_admin_passwords = '{"adb1":"YourStr0ngPass"}'
+#
+# 12-30 chars, upper + lower + digit, no double quote, cannot contain "admin".
+#
+# azure_autonomous_dbs = {
+#   adb1 = {
+#     name         = "adb-prod-eastus"
+#     display_name = "Autonomous Prod"
+#     vnet_ref     = "vnet1"          # private endpoint on the delegated subnet
+#
+#     # ── optional (defaults shown) ──
+#     # db_workload                      = "OLTP"       # or DW, AJD, APEX
+#     # db_version                       = "23ai"       # or 19c
+#     # license_model                    = "LicenseIncluded"  # or BringYourOwnLicense
+#     # compute_model                    = "ECPU"       # OCPU is legacy
+#     # compute_count                    = 2            # minimum 2 ECPUs
+#     # data_storage_size_in_tbs         = 1            # minimum 1
+#     # auto_scaling_enabled             = false        # compute up to 3x on demand
+#     # auto_scaling_for_storage_enabled = false
+#     # backup_retention_period_in_days  = 60           # 1-60
+#     # character_set                    = "AL32UTF8"
+#     # national_character_set           = "AL16UTF16"
+#     # mtls_connection_required         = true         # false allows TLS-only
+#     # customer_contacts                = ["dba@example.com"]
+#     # allowed_ips                      = []           # public ACL; only without vnet_ref
+#   }
+#
+#   # A public-endpoint database, locked to a couple of office ranges. Leave
+#   # vnet_ref out entirely — allowed_ips is ignored on a delegated subnet.
+#   # adb2 = {
+#   #   name         = "adb-dev-eastus"
+#   #   display_name = "Autonomous Dev"
+#   #   db_workload  = "DW"
+#   #   allowed_ips  = ["203.0.113.0/24", "198.51.100.7"]
+#   # }
+# }

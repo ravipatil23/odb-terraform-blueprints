@@ -168,3 +168,76 @@ module "vm_cluster" {
 
   depends_on = [module.exadata_infra, module.vnet]
 }
+
+# ── Autonomous Databases (Serverless) ─────────────────────────────────────────
+# Serverless has no Exadata Infrastructure under it — Oracle runs the fleet, so
+# this map is independent of azure_infras / azure_clusters. It attaches to the
+# same Oracle-delegated subnet the VM clusters use.
+#
+# vnet_ref is optional: a key in azure_vnets gives a private endpoint on that
+# delegated subnet; null gives a public endpoint governed by allowed_ips.
+module "autonomous_db" {
+  source   = "./modules/autonomous-db"
+  for_each = var.azure_autonomous_dbs
+
+  resource_group_name = var.resource_group_name
+  location            = var.location
+  name                = each.value.name
+  display_name        = each.value.display_name
+
+  db_workload   = each.value.db_workload
+  db_version    = each.value.db_version
+  license_model = each.value.license_model
+  compute_model = each.value.compute_model
+  compute_count = each.value.compute_count
+
+  data_storage_size_in_tbs         = each.value.data_storage_size_in_tbs
+  auto_scaling_enabled             = each.value.auto_scaling_enabled
+  auto_scaling_for_storage_enabled = each.value.auto_scaling_for_storage_enabled
+  backup_retention_period_in_days  = each.value.backup_retention_period_in_days
+
+  character_set          = each.value.character_set
+  national_character_set = each.value.national_character_set
+
+  mtls_connection_required = each.value.mtls_connection_required
+  allowed_ips              = each.value.allowed_ips
+  customer_contacts        = each.value.customer_contacts
+
+  # Indexed, not looked up: a missing password should stop the plan rather than
+  # reach the provider as null. The check below names the offending key first.
+  admin_password = var.autonomous_db_admin_passwords[each.key]
+
+  # A null vnet_ref means public access, so send empty strings — the module
+  # turns those into null, which is what the Optional schema wants.
+  subnet_id          = each.value.vnet_ref == null ? "" : module.vnet[each.value.vnet_ref].subnet_id
+  virtual_network_id = each.value.vnet_ref == null ? "" : module.vnet[each.value.vnet_ref].vnet_id
+
+  tags = var.tags
+
+  # Same ordering rule as the Exadata infra: the Resource Anchor must exist in
+  # the resource group first. With no anchors configured this is a no-op.
+  depends_on = [module.resource_anchor, module.vnet]
+}
+
+# Passwords come from the environment, so a typo in a key is easy to make and
+# the raw failure ("key ... does not exist") does not say which map is short.
+#
+# The password map is sensitive, so every value derived from it carries that
+# mark - including its key names, which an assertion may not report. Only the
+# keys are unwrapped here; the passwords themselves are never touched.
+locals {
+  autonomous_db_missing_passwords = setsubtract(
+    keys(var.azure_autonomous_dbs),
+    nonsensitive(keys(var.autonomous_db_admin_passwords)),
+  )
+}
+
+check "autonomous_db_passwords_present" {
+  assert {
+    condition = length(local.autonomous_db_missing_passwords) == 0
+    error_message = format(
+      "No ADMIN password supplied for these azure_autonomous_dbs keys: %s. Set them with TF_VAR_autonomous_db_admin_passwords='{\"key\":\"...\"}' - never in terraform.tfvars.",
+      join(", ", local.autonomous_db_missing_passwords),
+    )
+  }
+}

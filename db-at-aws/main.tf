@@ -36,6 +36,16 @@ module "odb_network" {
   default_dns_prefix          = each.value.default_dns_prefix
   delete_associated_resources = each.value.delete_associated_resources
   tags                        = var.tags
+
+  # Kept in their own runs so terraform fmt does not widen the block above to
+  # the length of cross_region_s3_restore_sources_access.
+  sts_access          = each.value.sts_access
+  kms_access          = each.value.kms_access
+  s3_policy_document  = each.value.s3_policy_document
+  sts_policy_document = each.value.sts_policy_document
+  kms_policy_document = each.value.kms_policy_document
+
+  cross_region_s3_restore_sources_access = each.value.cross_region_s3_restore_sources_access
 }
 
 # ── Exadata Infrastructures ───────────────────────────────────────────────────
@@ -84,6 +94,53 @@ locals {
   )
 }
 
+# Auto-discovered DB servers per cluster, filtered to the ones actually free.
+#
+# aws_odb_db_servers returns EVERY server on the infrastructure, including those
+# existing VM clusters already hold. On an infrastructure this blueprint just
+# created that is harmless - nothing is allocated yet - but on one that already
+# hosts clusters it hands back servers that are taken, and the create fails.
+#
+# That is the normal state of an infrastructure created outside Terraform (the
+# existing_infra_ids case), and it also bites the second cluster you put on an
+# infrastructure this blueprint made.
+#
+# vm_cluster_ids / autonomous_vm_cluster_ids are the allocation record: empty
+# means the server is unclaimed.
+locals {
+  auto_db_servers = {
+    for k, d in data.aws_odb_db_servers.this : k => [
+      for s in d.db_servers : s.id
+      if length(s.vm_cluster_ids) == 0 && length(s.autonomous_vm_cluster_ids) == 0
+    ]
+  }
+
+  # Same filter for the Autonomous clusters, off their own data source.
+  auto_db_servers_autonomous = {
+    for k, d in data.aws_odb_db_servers.autonomous : k => [
+      for s in d.db_servers : s.id
+      if length(s.vm_cluster_ids) == 0 && length(s.autonomous_vm_cluster_ids) == 0
+    ]
+  }
+
+  # Both kinds share one infrastructure, so an ExaDB-D cluster and an ADB-D
+  # cluster in the same apply would otherwise be handed the same free servers.
+  all_auto_db_servers = merge(local.auto_db_servers, local.auto_db_servers_autonomous)
+}
+
+# Every server on the infrastructure is already spoken for. Creating the cluster
+# with an empty db_servers list fails at the API with something far less
+# obvious, so say it here.
+check "auto_db_servers_available" {
+  assert {
+    condition = alltrue([for k, v in local.all_auto_db_servers : length(v) > 0])
+    error_message = format(
+      "No unallocated DB servers on the infrastructure for these clusters: %s. Every server is already held by another VM cluster. Add capacity to the infrastructure, or use db_servers_mode = \"manual\" to place the cluster deliberately.",
+      join(", ", [for k, v in local.all_auto_db_servers : k if length(v) == 0]),
+    )
+  }
+}
+
 # A key defined in both maps would create the resource *and* wire everything to
 # the pre-existing one, leaving the new resource orphaned. Catch it up front.
 check "no_duplicate_network_keys" {
@@ -115,6 +172,16 @@ data "aws_odb_db_servers" "this" {
   cloud_exadata_infrastructure_id = local.infra_ids[each.value.infra_ref]
 }
 
+# Same lookup for Autonomous clusters. A separate data source rather than a
+# shared one: the two maps have independent keyspaces, so "vmc1" in aws_clusters
+# and "vmc1" in aws_autonomous_clusters are different clusters that may sit on
+# different infrastructures.
+data "aws_odb_db_servers" "autonomous" {
+  depends_on                      = [module.exadata_infra]
+  for_each                        = { for k, v in var.aws_autonomous_clusters : k => v if v.db_servers_mode == "auto" }
+  cloud_exadata_infrastructure_id = local.infra_ids[each.value.infra_ref]
+}
+
 # ── Network Peerings (optional) ───────────────────────────────────────────────
 module "peering" {
   source   = "./modules/peering"
@@ -142,7 +209,7 @@ module "vm_cluster" {
   ssh_public_keys                   = each.value.ssh_public_keys
   cloud_exadata_infrastructure_id   = local.infra_ids[each.value.infra_ref]
   odb_network_id                    = local.odb_network_ids[each.value.network_ref]
-  db_servers                        = each.value.db_servers_mode == "auto" ? data.aws_odb_db_servers.this[each.key].db_servers[*].id : each.value.db_servers
+  db_servers                        = each.value.db_servers_mode == "auto" ? local.auto_db_servers[each.key] : each.value.db_servers
   dco_is_diagnostics_events_enabled = each.value.dco_is_diagnostics_events_enabled
   dco_is_health_monitoring_enabled  = each.value.dco_is_health_monitoring_enabled
   dco_is_incident_logs_enabled      = each.value.dco_is_incident_logs_enabled
@@ -155,6 +222,46 @@ module "vm_cluster" {
   is_local_backup_enabled           = each.value.is_local_backup_enabled
   is_sparse_diskgroup_enabled       = each.value.is_sparse_diskgroup_enabled
   tags                              = var.tags
+
+  depends_on = [module.odb_network, module.exadata_infra]
+}
+
+# ── Autonomous VM Clusters (optional) ─────────────────────────────────────────
+# ADB-D: hosts Autonomous Container Databases rather than DB Homes/CDBs/PDBs.
+# Shares the Exadata infrastructure and ODB network with the ExaDB-D clusters
+# above — infra_ref / network_ref key into the same maps.
+#
+# Leave aws_autonomous_clusters empty and nothing here applies.
+module "autonomous_vm_cluster" {
+  source   = "./modules/autonomous-vm-cluster"
+  for_each = var.aws_autonomous_clusters
+
+  display_name                    = each.value.display_name
+  cloud_exadata_infrastructure_id = local.infra_ids[each.value.infra_ref]
+  odb_network_id                  = local.odb_network_ids[each.value.network_ref]
+  db_servers                      = each.value.db_servers_mode == "auto" ? local.auto_db_servers_autonomous[each.key] : each.value.db_servers
+
+  autonomous_data_storage_size_in_tbs   = each.value.autonomous_data_storage_size_in_tbs
+  cpu_core_count_per_node               = each.value.cpu_core_count_per_node
+  memory_per_oracle_compute_unit_in_gbs = each.value.memory_per_oracle_compute_unit_in_gbs
+  total_container_databases             = each.value.total_container_databases
+
+  scan_listener_port_tls     = each.value.scan_listener_port_tls
+  scan_listener_port_non_tls = each.value.scan_listener_port_non_tls
+
+  license_model              = each.value.license_model
+  is_mtls_enabled_vm_cluster = each.value.is_mtls_enabled_vm_cluster
+  time_zone                  = each.value.time_zone
+  description                = each.value.description
+
+  mw_preference         = each.value.mw_preference
+  mw_lead_time_in_weeks = each.value.mw_lead_time_in_weeks
+  mw_days_of_week       = each.value.mw_days_of_week
+  mw_months             = each.value.mw_months
+  mw_hours_of_day       = each.value.mw_hours_of_day
+  mw_weeks_of_month     = each.value.mw_weeks_of_month
+
+  tags = var.tags
 
   depends_on = [module.odb_network, module.exadata_infra]
 }

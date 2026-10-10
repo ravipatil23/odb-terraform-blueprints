@@ -52,11 +52,21 @@ aws_networks = {
     # ── optional (defaults shown) ──
     # s3_access                   = "ENABLED"   # ENABLED | DISABLED
     # zero_etl_access             = "DISABLED"  # ENABLED | DISABLED
+    # sts_access                  = ""          # ENABLED | DISABLED; blank keeps the service value
+    # kms_access                  = ""          # ENABLED | DISABLED; blank keeps the service value
     # availability_zone           = ""          # AZ name override (prefer availability_zone_id)
     # region                      = ""          # region override (defaults to aws_region)
     # custom_domain_name          = ""          # custom DNS domain (mutually exclusive with default_dns_prefix)
     # default_dns_prefix          = ""          # DNS prefix (used only when custom_domain_name is blank)
     # delete_associated_resources = false       # delete associated resources on network deletion
+
+    # Endpoint policies (JSON). Each needs its access flag ENABLED to have any
+    # effect - the policy attaches to the endpoint that flag creates.
+    # s3_policy_document  = ""
+    # sts_policy_document = ""   # e.g. restrict which roles may be assumed
+    # kms_policy_document = ""   # e.g. restrict to TDE ops on one CMK
+
+    # cross_region_s3_restore_sources_access = []   # e.g. ["us-west-2"]
   }
 }
 
@@ -127,5 +137,46 @@ aws_clusters = {
 #     network_ref     = "net1"
 #     peer_network_id = "vpc-0123456789abcdef0"
 #     # region        = ""   # optional region override
+#   }
+# }
+
+# ── Autonomous VM Clusters (ADB-D, optional) ──────────────────────────────────
+# Hosts Autonomous Container Databases instead of DB Homes/CDBs/PDBs. Sits on the
+# SAME infra and network as the clusters above — infra_ref / network_ref key into
+# aws_infras / aws_networks exactly the same way.
+#
+# Leave unset and nothing here applies. Note oci-database does NOT chain onto
+# these: that blueprint builds DB Homes → CDBs → PDBs, which is the ExaDB-D model.
+#
+# aws_autonomous_clusters = {
+#   avmc1 = {
+#     display_name = "avmc-prod-use1"
+#     infra_ref    = "infra1"          # same Exadata infrastructure
+#     network_ref  = "net1"            # same ODB network
+#
+#     # Sizing is per node / per Oracle Compute Unit, not cluster totals.
+#     autonomous_data_storage_size_in_tbs   = 5
+#     cpu_core_count_per_node               = 8
+#     memory_per_oracle_compute_unit_in_gbs = 16
+#     total_container_databases             = 2
+#
+#     # Optional — these are the defaults
+#     # scan_listener_port_tls     = 2484
+#     # scan_listener_port_non_tls = 1521
+#     # license_model              = "LICENSE_INCLUDED"   # or BRING_YOUR_OWN_LICENSE
+#     # is_mtls_enabled_vm_cluster = false
+#     # time_zone                  = "UTC"
+#
+#     # Maintenance window lives on the CLUSTER here (on ExaDB-D it is on the
+#     # infrastructure). NO_PREFERENCE lets Oracle choose the timing.
+#     mw_preference = "NO_PREFERENCE"
+#
+#     # For CUSTOM_PREFERENCE, set the schedule too:
+#     # mw_preference         = "CUSTOM_PREFERENCE"
+#     # mw_days_of_week       = ["SATURDAY", "SUNDAY"]
+#     # mw_hours_of_day       = [4]
+#     # mw_months             = ["FEBRUARY", "MAY", "AUGUST", "NOVEMBER"]
+#     # mw_weeks_of_month     = [2]
+#     # mw_lead_time_in_weeks = 2
 #   }
 # }

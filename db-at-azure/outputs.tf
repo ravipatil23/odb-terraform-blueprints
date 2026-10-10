@@ -38,3 +38,11 @@ output "network_anchors" {
     name = m.name
   } }
 }
+
+output "autonomous_databases" {
+  description = "Autonomous Database (Serverless) details keyed by the azure_autonomous_dbs key."
+  value = { for k, m in module.autonomous_db : k => {
+    id   = m.autonomous_database_id
+    name = m.autonomous_database_name
+  } }
+}

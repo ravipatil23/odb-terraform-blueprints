@@ -1,8 +1,9 @@
 # Oracle Database@Azure — Terraform Blueprint
 
-A complete, standalone Terraform configuration for deploying **Oracle Database@Azure**
-(Oracle Exadata Database Service on Azure). You only edit [`terraform.tfvars`](terraform.tfvars) —
-the `.tf` files are reusable as-is.
+A complete, standalone Terraform configuration for deploying **Oracle Database@Azure** — both
+**Exadata Database Service** (Dedicated: infrastructure + VM cluster) and **Autonomous Database
+Serverless**. You only edit [`terraform.tfvars`](terraform.tfvars) — the `.tf` files are reusable
+as-is.
 
 ---
 
@@ -14,12 +15,16 @@ the `.tf` files are reusable as-is.
 4. [Authentication](#4-authentication)
 5. [Repository layout](#5-repository-layout)
 6. [Quick start](#6-quick-start)
+   - [Order of operations](#61-order-of-operations)
+   - [Provisioning time](#62-provisioning-time)
 7. [Variable reference](#7-variable-reference)
    - [Top-level](#71-top-level-variables)
    - [`azure_vnets`](#72-azure_vnets)
    - [`azure_infras`](#73-azure_infras)
    - [`azure_clusters`](#74-azure_clusters)
+   - [`azure_autonomous_dbs`](#75-azure_autonomous_dbs)
 8. [How resources are wired](#8-how-resources-are-wired)
+   - [Importing existing resources](#81-importing-existing-resources)
 9. [Scaling: adding more resources](#9-scaling-adding-more-resources)
 10. [Outputs](#10-outputs)
 11. [Day-2 operations](#11-day-2-operations)
@@ -38,6 +43,7 @@ the `.tf` files are reusable as-is.
 | 3 | Network Anchor | `azapi_resource` (`Oracle.Database/networkAnchors`) | `modules/network-anchor` | yes |
 | 4 | Exadata Infrastructure | `azurerm_oracle_exadata_infrastructure` | `modules/exadata-infra` | |
 | 5 | VM Cluster | `azurerm_oracle_cloud_vm_cluster` | `modules/vm-cluster` | |
+| — | Autonomous Database (Serverless) | `azurerm_oracle_autonomous_database` | `modules/autonomous-db` | yes |
 
 The subnet is automatically **delegated to `Oracle.Database/networkAttachments`**, which Azure
 requires before a VM cluster can attach to it.
@@ -56,6 +62,24 @@ deploys exactly what it always did.
 
 Already have anchors from a platform team? Put their IDs in
 `existing_resource_anchor_ids` rather than describing them — see [9](#9-scaling-adding-more-resources).
+
+### Autonomous Serverless sits beside the stack, not on it
+
+`azure_autonomous_dbs` has no `infra_ref` and no step number in the table above, because
+**Serverless is not Dedicated**: Oracle runs the Exadata fleet and the database is a slice of it.
+There is no Exadata Infrastructure and no VM Cluster underneath, so it is not rows 4–5 with a sixth
+bolted on — it is a parallel branch off the same VNet.
+
+What it shares with the rest is the network. It attaches to the **same Oracle-delegated subnet**,
+via `vnet_ref`, that the VM clusters use. Leave `vnet_ref` out and you get a public endpoint
+governed by `allowed_ips` instead.
+
+That independence cuts both ways: `azure_infras` and `azure_clusters` can be left empty and this
+blueprint deploys **only** Autonomous databases — in minutes rather than the hours a VM cluster
+takes ([§6.2](#62-provisioning-time)).
+
+The ADMIN password is the one input that never goes in `terraform.tfvars`; it comes from
+`TF_VAR_autonomous_db_admin_passwords` at apply time — see [§7.5](#75-azure_autonomous_dbs).
 
 **Providers:** `hashicorp/azurerm >= 4.9.0`, plus `Azure/azapi >= 2.0.0` for Network
 Anchors only — `azurerm` has no native resource for `Oracle.Database/networkAnchors`.
@@ -81,18 +105,26 @@ network anchors configured, nothing is created through it.
   ├───────────────┤       │   └──────────────┬─────────────────────┘    │
   │ azure_clusters │       │   ┌──────────────▼─────────────────────┐    │
   │                │──────┼──▶│  VM Cluster (modules/vm-cluster)    │    │
-  └───────────────┘       │   │  (attaches to delegated subnet)     │    │
-        map keys          │   └─────────────────────────────────────┘    │
-   wire everything        │                                              │
+  ├───────────────┤       │   │  (attaches to delegated subnet)     │    │
+  │ azure_         │      │   └─────────────────────────────────────┘    │
+  │  autonomous_dbs│──────┼──▶┌─────────────────────────────────────┐    │
+  └───────────────┘       │   │  Autonomous DB — Serverless         │    │
+        map keys          │   │  (modules/autonomous-db)            │    │
+   wire everything        │   │  no infra beneath: Oracle's fleet   │    │
+                          │   └─────────────────────────────────────┘    │
                           └─────────────────────────────────────────────┘
 ```
 
-The three maps in `terraform.tfvars` are joined by **keys**, not by IDs:
+The maps in `terraform.tfvars` are joined by **keys**, not by IDs:
 
 ```
-azure_clusters["vmc1"].vnet_ref  = "vnet1"   ─▶ azure_vnets["vnet1"]
-azure_clusters["vmc1"].infra_ref = "infra1"  ─▶ azure_infras["infra1"]
+azure_clusters["vmc1"].vnet_ref       = "vnet1"   ─▶ azure_vnets["vnet1"]
+azure_clusters["vmc1"].infra_ref      = "infra1"  ─▶ azure_infras["infra1"]
+azure_autonomous_dbs["adb1"].vnet_ref = "vnet1"   ─▶ azure_vnets["vnet1"]   (optional)
 ```
+
+The Autonomous branch stops at the VNet. It has no `infra_ref` because nothing of yours sits
+underneath it.
 
 ---
 
@@ -113,9 +145,11 @@ Before `terraform apply`:
    az provider register --namespace Oracle.Database
    ```
 4. **A region where Oracle Database@Azure is offered**, and the availability **zone** number for it
-   (e.g. `"2"`).
+   (e.g. `"2"`). Autonomous Database Serverless takes no zone — Oracle places it — but the
+   `db_version` and workload you want must be offered in that region.
 5. **RBAC permissions** to create networking + Oracle.Database resources in the resource group.
-6. **Capacity / quota** for the chosen shape in that region/zone.
+6. **Capacity / quota** for the chosen shape in that region/zone. Serverless is quota'd in **ECPUs**
+   rather than by shape.
 7. **Terraform `>= 1.5.0`** (the configuration uses optional object attributes).
 
 ---
@@ -151,7 +185,8 @@ db-at-azure/
     ├── vnet/            # VNet + Oracle-delegated subnet
     ├── network-anchor/  # Network Anchor   (optional, needs a subnet + Resource Anchor)
     ├── exadata-infra/   # Exadata infrastructure
-    └── vm-cluster/      # VM cluster
+    ├── vm-cluster/      # VM cluster
+    └── autonomous-db/   # Autonomous Database Serverless (optional, no infra beneath)
 ```
 
 ---
@@ -159,7 +194,7 @@ db-at-azure/
 ## 6. Quick start
 
 ```bash
-cd blueprints/db-at-azure
+cd db-at-azure
 
 # 1. authenticate
 az login
@@ -167,15 +202,78 @@ az login
 # 2. edit terraform.tfvars — set subscription_id, resource_group_name (must exist),
 #    location, VNet/subnet CIDRs, zone, and your real SSH public key
 
-# 3. run
+# 3. only if you filled in azure_autonomous_dbs — ADMIN passwords never go in tfvars.
+#    One entry per azure_autonomous_dbs key:
+export TF_VAR_autonomous_db_admin_passwords='{"adb1":"YourStr0ngPass"}'
+
+# 4. run
 terraform init
 terraform plan           # review what will be created
 terraform apply
 ```
 
-> **Heads-up on timing:** the Exadata infrastructure plus VM cluster can take **several hours** to
-> provision. The modules set generous `timeouts` (infra create = 6h, cluster create = 3h) so apply
-> does not abort early.
+### 6.1 Order of operations
+
+One `terraform apply` builds everything. Terraform derives the order from the module graph — you do
+not stage it:
+
+```
+resource_anchor ──────────────▶ exadata_infra ─┐
+vnet ──▶ network_anchor ───────────────────────┴──▶ vm_cluster
+    └──────────────────────────────────────────────▶ autonomous_db
+```
+
+The Exadata infrastructure takes no argument from the Resource Anchor, but the anchor must exist in
+the resource group first — an explicit `depends_on` enforces that. With both anchor maps empty the
+anchor steps drop out and the graph is simply `vnet → exadata_infra → vm_cluster`.
+
+Autonomous databases hang off the VNet alone (plus the same `depends_on` for the anchor). They do
+not wait for the infrastructure or the cluster and are built in parallel with them, so adding one to
+an existing stack costs nothing on the critical path.
+
+### 6.2 Provisioning time
+
+This apply is measured in **hours, not minutes**. Plan a window and let it run to completion.
+
+| Resource | Typical elapsed | Module timeout ceiling |
+|----------|-----------------|------------------------|
+| VNet + delegated subnet | ~2–5 min | provider default (module sets none) |
+| Resource Anchor *(optional)* | ~10–30 min | create 1h · delete 1h |
+| Network Anchor *(optional)* | ~10–30 min | provider default (module sets none) |
+| Exadata infrastructure | ~15–20 min | create 6h · delete 3h |
+| **VM cluster** | **~4–8 h** | create 12h · update 2h · delete 8h |
+| Autonomous Database *(optional)* | ~5–15 min | provider default (module sets none) |
+| **Full apply (critical path)** | **~5–9 h** | — |
+
+**The Exadata infrastructure is the fastest thing here, not the slowest.** The hardware provisions in
+15–20 minutes; the **VM cluster** (4–8 h) dominates the build and is the only figure worth budgeting
+on. Because the anchor/infra and VNet/anchor branches run in parallel and both finish inside ~30
+minutes, the critical path is essentially the cluster plus a short head start.
+
+**An Autonomous-only apply is a different exercise entirely.** With `azure_infras` and
+`azure_clusters` empty, the critical path is the VNet plus the database — minutes, not hours.
+Serverless provisions against Oracle's existing fleet; there is no hardware to stand up.
+
+Azure has no ODB network resource — the networking here is a plain Azure VNet and delegated subnet,
+which is quick. On [`db-at-aws`](../db-at-aws) and [`db-at-gcp`](../db-at-gcp) the ODB network is a
+second long pole (up to ~4 h), pushing those builds to 8–12 h; this blueprint has no equivalent step.
+
+The two columns are different things. **Typical elapsed** comes from observed runs and is still a
+range — it varies with shape, node counts, region and current capacity. **Timeout ceiling** is
+exact: it is the `timeouts` block in that module's `main.tf`, the point at which Terraform stops
+waiting and errors. It is a limit, not an estimate.
+
+Terraform prints `Still creating... [10m0s elapsed]` the whole time; that is healthy, not a hang.
+To capture your own figures:
+
+```bash
+time terraform apply -auto-approve
+TF_LOG=INFO terraform apply 2>&1 | grep -E "Creation complete|Still creating"
+```
+
+Destroying is no faster — 8h on the cluster, 3h on the infra. And because every VM cluster argument
+is ForceNew, a change Terraform cannot apply in place proposes **replacement**, paying the
+multi-hour cluster build again — see [§11](#11-day-2-operations).
 
 ---
 
@@ -189,11 +287,19 @@ terraform apply
 | `resource_group_name` | string | ✅ | Existing resource group (not created by this config). |
 | `location` | string | ✅ | Azure region, e.g. `eastus`. |
 | `tags` | map(string) | — | Tags applied to all resources. Default `{}`. |
+| `azure_autonomous_dbs` | map(object) | — | Autonomous Databases (Serverless). Default `{}` — see [§7.5](#75-azure_autonomous_dbs). |
+| `autonomous_db_admin_passwords` | map(string), sensitive | — | ADMIN password per `azure_autonomous_dbs` key. **Never put this in `terraform.tfvars`** — export `TF_VAR_autonomous_db_admin_passwords`. Default `{}`. |
+
+The map variables that drive the rest — `azure_resource_anchors`,
+`existing_resource_anchor_ids`, `azure_network_anchors`, `azure_vnets`, `azure_infras`,
+`azure_clusters` — all default to `{}` and are documented in the sections below.
 
 ### 7.2 `azure_vnets`
 
 Map of VNets, each with one Oracle-delegated subnet. The map **key** is referenced by
-`azure_clusters[*].vnet_ref`.
+`azure_clusters[*].vnet_ref`, `azure_network_anchors[*].vnet_ref` and
+`azure_autonomous_dbs[*].vnet_ref`. One delegated subnet can carry VM clusters and Autonomous
+databases at the same time.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -252,6 +358,57 @@ Map of VM clusters. `infra_ref` and `vnet_ref` must match keys in `azure_infras`
 > `file_system_configuration`, and the `dco_*` toggles). Add them to the `azure_clusters` object type
 > in `variables.tf` and wire them in `main.tf` if you need them.
 
+### 7.5 `azure_autonomous_dbs`
+
+Map of **Autonomous Database Serverless** instances. There is no `infra_ref` — see
+[§1](#autonomous-serverless-sits-beside-the-stack-not-on-it). `vnet_ref` is optional and, when set,
+must match a key in `azure_vnets`.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | string | — (required) | Azure resource name. |
+| `display_name` | string | — (required) | Name shown in the OCI console. |
+| `vnet_ref` | string | `null` | Key into `azure_vnets`. Set it for a **private** endpoint on the Oracle-delegated subnet. Leave it out for a **public** endpoint and use `allowed_ips`. |
+| `db_workload` | string | `OLTP` | `OLTP` (transaction processing), `DW` (data warehouse), `AJD` (JSON) or `APEX`. |
+| `db_version` | string | `23ai` | `19c` or `23ai`. Deliberately unvalidated — a newer release is a tfvars edit, not a code change. |
+| `license_model` | string | `LicenseIncluded` | or `BringYourOwnLicense` (Azure-style casing). |
+| `compute_model` | string | `ECPU` | `OCPU` is legacy; use ECPU for anything new. |
+| `compute_count` | number | `2` | ECPUs. Minimum 2 on the ECPU model; fractional values allowed. |
+| `data_storage_size_in_tbs` | number | `1` | Storage in TB, minimum 1. |
+| `auto_scaling_enabled` | bool | `false` | Let compute scale up to **3×** the base count on demand. |
+| `auto_scaling_for_storage_enabled` | bool | `false` | Let storage grow past the reserved size. |
+| `backup_retention_period_in_days` | number | `60` | Automatic backup retention, 1–60. |
+| `character_set` | string | `AL32UTF8` | Database character set. |
+| `national_character_set` | string | `AL16UTF16` | NCHAR character set. |
+| `mtls_connection_required` | bool | `true` | Require mutual TLS. `false` allows TLS-only clients. |
+| `allowed_ips` | list(string) | `[]` | Public access ACL (IPs or CIDRs). **Only meaningful without `vnet_ref`** — on a delegated subnet it is ignored. |
+| `customer_contacts` | list(string) | `[]` | Email addresses Oracle notifies about this database. |
+
+#### The ADMIN password
+
+The provider requires an ADMIN password, and it is the one input this blueprint refuses to read from
+`terraform.tfvars`. It comes from a separate **sensitive map**, `autonomous_db_admin_passwords`,
+keyed by the same key as the database:
+
+```bash
+export TF_VAR_autonomous_db_admin_passwords='{"adb1":"YourStr0ngPass","adb2":"An0therStr0ng"}'
+```
+
+```powershell
+$env:TF_VAR_autonomous_db_admin_passwords = '{"adb1":"YourStr0ngPass"}'
+```
+
+Oracle's rules: **12–30 characters**, at least one uppercase, one lowercase and one digit, no double
+quote, and it may not contain the word `admin`.
+
+Miss a key and the plan stops with `Invalid index` on `var.autonomous_db_admin_passwords`, naming
+the database it could not find a password for. A `check` block reports the same thing in plainer
+words first. The passwords themselves are never printed: the variable is `sensitive`, and only the
+map's **key names** are unwrapped to build that message.
+
+> The password is written to state. Use a remote backend with encryption at rest — see
+> [§11](#11-day-2-operations).
+
 ---
 
 ## 8. How resources are wired
@@ -265,9 +422,182 @@ cloud_exadata_infrastructure_id = module.exadata_infra[each.value.infra_ref].inf
 # cluster → delegated subnet ID + VNet ID (from the vnet module outputs)
 subnet_id          = module.vnet[each.value.vnet_ref].subnet_id
 virtual_network_id = module.vnet[each.value.vnet_ref].vnet_id
+
+# autonomous DB → the same subnet, but vnet_ref is optional. A null one means a
+# public endpoint, so empty strings go down and the module turns them into null:
+# "" is not a valid resource ID, and these attributes are Optional in the schema.
+subnet_id          = each.value.vnet_ref == null ? "" : module.vnet[each.value.vnet_ref].subnet_id
+virtual_network_id = each.value.vnet_ref == null ? "" : module.vnet[each.value.vnet_ref].vnet_id
 ```
 
 That's why the only thing you set in tfvars is the **key** (`infra_ref = "infra1"`).
+
+### 8.1 Importing existing resources
+
+Use this when a component was provisioned outside Terraform (portal, `az` CLI, another team) and you
+want Terraform to **manage** it from now on — as opposed to `existing_resource_anchor_ids`, which
+only references an anchor.
+
+The rule: **write the config to match what already exists, then import, then confirm a clean plan.**
+Terraform does not generate the config from the resource; you describe reality and the import
+attaches state to it.
+
+#### The workflow
+
+```bash
+# 1. Describe the existing resource in terraform.tfvars, matching its real settings exactly
+# 2. Add an import block (below) naming the module address and the ARM resource ID
+terraform plan          # ◀── must report "0 to add, 0 to change, 0 to destroy"
+terraform apply         # records the import in state
+# 3. Delete the import block — it has done its job
+```
+
+**A clean plan is the acceptance test.** If the plan proposes *changes*, your tfvars do not match
+reality — fix the tfvars, not the resource. If it proposes *replacement*, something ForceNew
+disagrees (usually `zone`, `shape`, or the subnet); fix that before applying or you will destroy the
+resource you just imported.
+
+For the anchors, the `prevent_destroy` guards in [§12](#12-destroying) work in your favour: a
+replacement plan **errors out** instead of proceeding, so a mismatched import fails loudly.
+
+#### Module addresses and import IDs
+
+Every module is `for_each`'d, so the address carries the **map key** in quotes — the same key you use
+in `terraform.tfvars`. Azure resources import by their **full ARM resource ID**:
+
+| Resource | Import block `to` address | ID to import |
+|----------|---------------------------|--------------|
+| Resource Anchor | `module.resource_anchor["anchor1"].azurerm_oracle_resource_anchor.this` | `/subscriptions/…/providers/Oracle.Database/resourceAnchors/NAME` |
+| VNet | `module.vnet["vnet1"].azurerm_virtual_network.this` | `/subscriptions/…/providers/Microsoft.Network/virtualNetworks/NAME` |
+| Delegated subnet | `module.vnet["vnet1"].azurerm_subnet.oracle_delegated` | `/subscriptions/…/virtualNetworks/VNET/subnets/NAME` |
+| Network Anchor | `module.network_anchor["na1"].azapi_resource.this` | `/subscriptions/…/providers/Oracle.Database/networkAnchors/NAME` |
+| Exadata infrastructure | `module.exadata_infra["infra1"].azurerm_oracle_exadata_infrastructure.this` | `/subscriptions/…/providers/Oracle.Database/cloudExadataInfrastructures/NAME` |
+| VM cluster | `module.vm_cluster["vmc1"].azurerm_oracle_cloud_vm_cluster.this` | `/subscriptions/…/providers/Oracle.Database/cloudVmClusters/NAME` |
+| Autonomous Database | `module.autonomous_db["adb1"].azurerm_oracle_autonomous_database.this` | `/subscriptions/…/providers/Oracle.Database/autonomousDatabases/NAME` |
+
+> Adopting an Autonomous Database still needs its ADMIN password in
+> `autonomous_db_admin_passwords` before the import — the argument is required, so the config is
+> incomplete without it. The provider cannot read the existing password back, so give it the one the
+> database actually has, or expect the first plan after the import to propose changing it.
+
+> The VNet module owns **two** resources — the VNet and the delegated subnet. Adopting a VNet means
+> two import blocks. Confirm the exact ID format against your provider version; `az resource show`
+> below prints the value to use verbatim.
+
+#### Example: adopting an existing VNet and infrastructure
+
+```hcl
+# imports.tf — delete this file once the imports have been applied
+
+import {
+  to = module.vnet["vnet1"].azurerm_virtual_network.this
+  id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-oracle/providers/Microsoft.Network/virtualNetworks/vnet-oracle"
+}
+
+import {
+  to = module.vnet["vnet1"].azurerm_subnet.oracle_delegated
+  id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-oracle/providers/Microsoft.Network/virtualNetworks/vnet-oracle/subnets/snet-oracle-delegated"
+}
+
+import {
+  to = module.exadata_infra["infra1"].azurerm_oracle_exadata_infrastructure.this
+  id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-oracle/providers/Oracle.Database/cloudExadataInfrastructures/exa-prod"
+}
+```
+
+with the matching entries describing what is really there:
+
+```hcl
+# terraform.tfvars
+azure_vnets = {
+  vnet1 = {
+    vnet_name             = "vnet-oracle"       # ← must match
+    address_space         = "10.10.0.0/16"      # ← must match
+    subnet_name           = "snet-oracle-delegated"
+    subnet_address_prefix = "10.10.1.0/24"
+  }
+}
+
+azure_infras = {
+  infra1 = {
+    name          = "exa-prod"                  # ← must match
+    display_name  = "exa-prod"
+    shape         = "Exadata.X11M"              # ← must match the real shape
+    compute_count = 2
+    storage_count = 3
+    zone          = "2"                         # ← must match
+  }
+}
+```
+
+Clusters that already reference `vnet_ref = "vnet1"` / `infra_ref = "infra1"` need no change — the
+keys now resolve to the imported resources.
+
+#### Importing the Network Anchor (`azapi`)
+
+The Network Anchor goes through the **`azapi`** provider rather than `azurerm`, so its import is the
+one that behaves differently — the ID carries the API version as a query string, and it must match
+the `type` pinned in the module (`Oracle.Database/networkAnchors@2025-09-01`):
+
+```hcl
+import {
+  to = module.network_anchor["na1"].azapi_resource.this
+  id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-oracle/providers/Oracle.Database/networkAnchors/na-prod?api-version=2025-09-01"
+}
+```
+
+An `azapi` import with a mismatched or missing `api-version` fails or produces a permanent diff in
+`body`. If the plan will not settle, check that version first.
+
+#### Finding the IDs
+
+```bash
+# Full ARM ID of any resource, ready to paste
+az resource show -g rg-oracle -n exa-prod \
+  --resource-type Oracle.Database/cloudExadataInfrastructures --query id -o tsv
+
+# Everything Oracle in a resource group
+az resource list -g rg-oracle --query "[?starts_with(type,'Oracle.Database')].{name:name,type:type,id:id}" -o table
+
+# VNets and subnets
+az network vnet list -g rg-oracle --query "[].{name:name,id:id}" -o table
+
+# Autonomous Databases in the group
+az resource list -g rg-oracle --resource-type Oracle.Database/autonomousDatabases   --query "[].{name:name,id:id}" -o table
+```
+
+#### Importing several at once
+
+Terraform **1.7+** accepts `for_each` on import blocks, which is worth it when adopting a whole
+estate:
+
+```hcl
+variable "import_infra_ids" {
+  type    = map(string)
+  default = {} # e.g. { infra1 = "/subscriptions/…/cloudExadataInfrastructures/exa-prod" }
+}
+
+import {
+  for_each = var.import_infra_ids
+  to       = module.exadata_infra[each.key].azurerm_oracle_exadata_infrastructure.this
+  id       = each.value
+}
+```
+
+On Terraform 1.5–1.6, write one static `import` block per resource instead.
+
+#### Import or reference?
+
+For **Resource Anchors** you have both options, and they are not the same:
+
+| | `existing_resource_anchor_ids` | `import` |
+|---|---|---|
+| Terraform manages it | No — read-only reference | **Yes** |
+| Appears in `terraform destroy` | No | **Yes** (blocked by `prevent_destroy`) |
+| Config must match reality | No | **Yes**, exactly |
+| Use when | A platform team owns it | You are taking ownership |
+
+Mixing is fine: import the infrastructure you own and reference the anchor another team runs.
 
 ---
 
@@ -311,6 +641,43 @@ provider reads the API's value back into state. An empty config therefore compar
 the range the service assigned, and every later `terraform plan` proposes **destroying and
 recreating the cluster** — a multi-hour rebuild. Always state the range explicitly; the default
 `192.168.252.0/22` is the range the service would have picked anyway.
+
+### Adding an Autonomous Database
+
+Add an entry to `azure_autonomous_dbs` and a matching password to the environment. Several databases
+can share one `vnet_ref` with no extra thought — unlike VM clusters, Serverless has no per-instance
+backup range to keep apart, because Oracle owns the storage beneath it:
+
+```hcl
+azure_autonomous_dbs = {
+  adb1 = {
+    name         = "adb-prod-eastus"
+    display_name = "Autonomous Prod"
+    vnet_ref     = "vnet1"           # private endpoint on the delegated subnet
+    compute_count            = 4
+    data_storage_size_in_tbs = 2
+    auto_scaling_enabled     = true  # burst to 12 ECPUs
+  }
+  adb2 = {                           # ← new, same subnet, no collision to avoid
+    name         = "adb-reporting-eastus"
+    display_name = "Autonomous Reporting"
+    vnet_ref     = "vnet1"
+    db_workload  = "DW"
+  }
+}
+```
+
+```bash
+export TF_VAR_autonomous_db_admin_passwords='{"adb1":"YourStr0ngPass","adb2":"An0therStr0ng"}'
+```
+
+**Resizing is online.** `compute_count` and `data_storage_size_in_tbs` scale in place — no
+`ForceNew`, none of the multi-hour replacement risk that dominates day-2 work on a VM cluster
+([§11](#11-day-2-operations)). Changing `name`, `character_set` or `national_character_set` does
+replace the database; the rest of the map is a normal update.
+
+Turn on `auto_scaling_enabled` and Oracle scales compute up to **3×** `compute_count` on demand and
+bills the difference. The base count is what you reserve, not what you cap.
 
 ### Why the module has an `ignore_changes` guard
 
@@ -437,6 +804,7 @@ location.)
 | `vnets` | map keyed by VNet key | `vnet_id`, `subnet_id` |
 | `exadata_infras` | map keyed by infra key | `infra_id`, `infra_name` |
 | `vm_clusters` | map keyed by cluster key | `cluster_id`, **`ocid`** |
+| `autonomous_databases` | map keyed by `azure_autonomous_dbs` key | `id`, `name` |
 
 ```bash
 terraform output vm_clusters
@@ -445,6 +813,11 @@ terraform output -json | jq '.vm_clusters.value.vmc1.ocid'
 
 The cluster **`ocid`** is the handle you feed to the `oracle/oci` provider if you go on to create
 DB Homes / CDBs / PDBs on the cluster.
+
+`autonomous_databases` has no equivalent handoff, and that is the point: a Serverless database is
+already a database. There is no DB Home, CDB or PDB layer to build on it, so nothing here feeds
+[`oci-database`](../oci-database). Connect to it with a wallet from the Azure portal or the OCI
+console.
 
 ---
 
@@ -456,7 +829,12 @@ DB Homes / CDBs / PDBs on the cluster.
   delegated subnet for other workloads.
 - **Long-running creates** are covered by module `timeouts`. If you raise shapes/counts substantially,
   you may want to increase them further.
+- **Autonomous resizing is online** — `compute_count` and `data_storage_size_in_tbs` change in
+  place, unlike almost every VM-cluster field. See [§9](#adding-an-autonomous-database) for what
+  does force replacement.
 - **State:** local by default. For team use, add a `backend "azurerm"` block to `main.tf` and re-init.
+  This matters more once you use `azure_autonomous_dbs`: the ADMIN password is stored in state, so
+  keep state remote and encrypted, never in git.
 
 ---
 
@@ -466,8 +844,31 @@ DB Homes / CDBs / PDBs on the cluster.
 terraform destroy
 ```
 
-Destroy order is handled automatically (cluster → infra → VNet/subnet). The pre-existing resource
-group is not touched.
+Destroy order is handled automatically (cluster → infra → VNet/subnet, and Autonomous databases
+before the VNet they attach to). The pre-existing resource group is not touched.
+
+Autonomous databases carry no `prevent_destroy` guard and are torn down in minutes. **The data goes
+with them** — take a manual backup first if you need one.
+
+**Anchors are delete-protected.** If you configured `azure_resource_anchors` or
+`azure_network_anchors`, those modules carry `lifecycle { prevent_destroy = true }` — the resource
+anchor because destroying it unlinks the OCI compartment every other Database@Azure resource in the
+group hangs off, the network anchor because it is the path between the delegated subnet and OCI.
+`terraform destroy` fails with an error naming the resource rather than cutting that link.
+
+To tear one down deliberately, delete the `lifecycle` block from that module's `main.tf`, `apply`,
+then destroy:
+
+```bash
+# e.g. to allow the resource anchor to be destroyed
+#   edit modules/resource-anchor/main.tf, remove the lifecycle block
+terraform apply
+terraform destroy
+```
+
+`prevent_destroy` only accepts a literal, so unlike the GCP blueprint's `deletion_protection` input
+it cannot be toggled from `terraform.tfvars` — editing the module is the only route. With both
+anchor maps left empty, nothing is protected and the plain `terraform destroy` above just works.
 
 ---
 
@@ -481,7 +882,11 @@ group is not touched.
 | Invalid `zone` | Use the zone **number** as a string (`"2"`), and one offered for Oracle in your region. |
 | `license_model` rejected | Use Azure casing: `LicenseIncluded` or `BringYourOwnLicense`. |
 | `Invalid index` on `module.exadata_infra[...]` | A cluster's `infra_ref`/`vnet_ref` doesn't match an existing map key. |
-| Apply seems to hang for a long time | Expected — infra/cluster provisioning is measured in hours (timeouts up to 6h). |
+| `Invalid index` on `var.autonomous_db_admin_passwords` | No ADMIN password for that `azure_autonomous_dbs` key. Set `TF_VAR_autonomous_db_admin_passwords` — see [§7.5](#75-azure_autonomous_dbs). |
+| Autonomous DB rejects the ADMIN password | 12–30 chars, upper + lower + digit, no `"`, and it may not contain the word `admin`. |
+| `compute_count` rejected on an Autonomous DB | Minimum is **2** ECPUs on the ECPU compute model. |
+| Autonomous DB `db_version` not available | `19c` and `23ai` are not offered in every region, and availability differs by workload. Check the region before applying. |
+| Apply seems to hang for a long time | Expected — the VM cluster (4–8h) dominates; the infra finishes in ~15–20 min and then waits. See [§6.2](#62-provisioning-time). |
 
 Validate before applying:
 
@@ -505,6 +910,23 @@ Yes. Replace `terraform` with `tofu`; OpenTofu resolves `hashicorp/azurerm` from
 Resource groups are usually governed centrally (policy, naming, RBAC). The blueprint takes an existing
 one so it slots into your environment cleanly. Add an `azurerm_resource_group` resource to `main.tf`
 if you'd rather Terraform own it.
+
+**Autonomous Serverless or a VM cluster?**
+Serverless if you want a managed database in minutes with no infrastructure to size, patch or pay
+for while idle — Oracle runs the fleet and you rent ECPUs. A VM cluster (Dedicated) if you need
+control of the Exadata hardware, OS-level access, custom CDB/PDB layouts, or Data Guard between
+clusters. They are independent maps in the same blueprint, so you can run either or both.
+
+**Can I deploy only Autonomous databases?**
+Yes. Leave `azure_infras` and `azure_clusters` empty and fill in `azure_vnets` (for a private
+endpoint) plus `azure_autonomous_dbs`. The apply takes minutes instead of hours.
+
+**Is “Oracle AI Database” a different `db_version`?**
+No — it is Oracle's branding for the 23ai-and-later line, not a separate version string. Set
+`db_version = "23ai"`, which is this blueprint's default; the AI features (AI Vector Search, Select
+AI, JSON Relational Duality) come with that release. The field is deliberately unvalidated, so when
+your region offers a newer release you set it in `terraform.tfvars` without touching a `.tf` file.
+Availability varies by region and workload — check before you apply.
 
 **How do I create databases (CDB/PDB) on the cluster?**
 Use the cluster `ocid` output with the `oracle/oci` provider. The main Terraflow Studio app can

@@ -1,0 +1,9 @@
+output "odb_network_id" { value = google_oracle_database_odb_network.this.odb_network_id }
+output "odb_network_name" { value = google_oracle_database_odb_network.this.name }
+output "state" { value = google_oracle_database_odb_network.this.state }
+
+output "client_subnet_name" { value = google_oracle_database_odb_subnet.client.name }
+output "client_subnet_id" { value = google_oracle_database_odb_subnet.client.odb_subnet_id }
+
+# No backup_subnet_* outputs — this network has no backup subnet. A VM Cluster
+# needs one, which is why clusters may not reference an ADB-S-only network.

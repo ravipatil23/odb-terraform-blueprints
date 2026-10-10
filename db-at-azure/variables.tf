@@ -129,3 +129,62 @@ variable "azure_clusters" {
   }))
   default = {}
 }
+
+# ── Autonomous Databases (Serverless) ─────────────────────────────────────────
+# Oracle Autonomous Database Serverless. Independent of azure_infras and
+# azure_clusters: Oracle runs the fleet, so there is no Exadata Infrastructure
+# or VM Cluster underneath and no infra_ref. Leave the map empty and nothing is
+# created.
+#
+# vnet_ref is optional. Set it to a key in azure_vnets for private access over
+# the Oracle-delegated subnet (the usual choice); leave it null for a public
+# endpoint and restrict it with allowed_ips.
+variable "azure_autonomous_dbs" {
+  description = "Map of Autonomous Databases (Serverless) keyed by a short name."
+  type = map(object({
+    name         = string
+    display_name = string
+
+    # Key in azure_vnets. Null means a public endpoint — pair that with allowed_ips.
+    vnet_ref = optional(string, null)
+
+    db_workload = optional(string, "OLTP") # OLTP | DW | AJD | APEX
+    db_version  = optional(string, "23ai") # 19c | 23ai — Oracle AI Database releases
+
+    license_model = optional(string, "LicenseIncluded")
+    compute_model = optional(string, "ECPU")
+    compute_count = optional(number, 2) # minimum 2 ECPUs; fractional allowed
+    # Storage in TB, minimum 1.
+    data_storage_size_in_tbs = optional(number, 1)
+
+    auto_scaling_enabled             = optional(bool, false) # compute up to 3x on demand
+    auto_scaling_for_storage_enabled = optional(bool, false)
+
+    backup_retention_period_in_days = optional(number, 60) # 1-60
+
+    character_set          = optional(string, "AL32UTF8")
+    national_character_set = optional(string, "AL16UTF16")
+
+    mtls_connection_required = optional(bool, true)
+
+    # Public access control list. Only meaningful when vnet_ref is null.
+    allowed_ips = optional(list(string), [])
+
+    customer_contacts = optional(list(string), [])
+  }))
+  default = {}
+}
+
+# Never put these in terraform.tfvars. Supply them at apply time, keyed by the
+# same key used in azure_autonomous_dbs:
+#
+#   export TF_VAR_autonomous_db_admin_passwords='{"adb1":"..."}'
+#
+# Oracle's rules: 12-30 chars, at least one upper, one lower and one digit, no
+# double quote, and it cannot contain the word "admin".
+variable "autonomous_db_admin_passwords" {
+  description = "ADMIN passwords for each entry in azure_autonomous_dbs, keyed by the same map key."
+  type        = map(string)
+  sensitive   = true
+  default     = {}
+}

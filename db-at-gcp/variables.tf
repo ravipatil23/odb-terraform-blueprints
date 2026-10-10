@@ -92,3 +92,87 @@ variable "gcp_vm_clusters" {
   }))
   default = {}
 }
+
+# ── ODB Networks — Autonomous AI Database Serverless only ─────────────────────
+# Same as gcp_odb_networks minus the backup subnet, which only Exadata VM
+# Clusters use. Keys here share one namespace with gcp_odb_networks: a key in
+# both maps is rejected before apply.
+variable "gcp_odb_networks_adbs" {
+  description = "Map of ODB Networks with a client subnet only. Key is referenced by gcp_autonomous_dbs.network_key. Not usable by gcp_vm_clusters."
+  type = map(object({
+    odb_network_id    = string
+    network           = string
+    client_subnet_id  = string
+    client_cidr_range = string
+    # No backup_subnet_id / backup_cidr_range — an Autonomous Database never
+    # uses a backup subnet. Use gcp_odb_networks if a VM Cluster needs one too.
+    location            = optional(string, "")
+    project             = optional(string, "")
+    gcp_oracle_zone     = optional(string, "")
+    deletion_protection = optional(bool, true)
+    labels              = optional(map(string), {})
+  }))
+  default = {}
+}
+
+# ── Autonomous AI Databases (Serverless) ──────────────────────────────────────
+# Independent of gcp_exadata_infras and gcp_vm_clusters: Oracle runs the fleet,
+# so there is no Exadata Infrastructure or VM Cluster underneath and no
+# infra_key. Leave the map empty and nothing is created.
+#
+# Regional, not zonal — unlike infrastructures, clusters and subnets, an
+# Autonomous Database takes no gcp_oracle_zone.
+variable "gcp_autonomous_dbs" {
+  description = "Map of Autonomous AI Databases (Serverless). network_key must match a key in gcp_odb_networks or gcp_odb_networks_adbs."
+  type = map(object({
+    autonomous_database_id = string # immutable; lowercase letters/digits/hyphens, max 63
+    database               = string # Oracle DB name: starts with a letter, max 30 alphanumeric
+    network_key            = string # key in gcp_odb_networks or gcp_odb_networks_adbs
+
+    display_name = optional(string, "") # falls back to autonomous_database_id
+    location     = optional(string, "") # region override (defaults to gcp_region)
+    project      = optional(string, "") # project override (defaults to gcp_project)
+
+    db_workload  = optional(string, "OLTP")               # OLTP | DW | AJD | APEX
+    license_type = optional(string, "LICENSE_INCLUDED")   # or BRING_YOUR_OWN_LICENSE
+    db_edition   = optional(string, "ENTERPRISE_EDITION") # or STANDARD_EDITION
+    db_version   = optional(string, "23ai")               # 19c | 23ai
+
+    compute_count                   = optional(number, 2)   # ECPUs, minimum 2
+    data_storage_size_gb            = optional(number, 120) # storage in GB
+    is_auto_scaling_enabled         = optional(bool, true)  # compute up to 3x on demand
+    is_storage_auto_scaling_enabled = optional(bool, false)
+
+    backup_retention_period_days = optional(number, 60)        # 1-60
+    maintenance_schedule_type    = optional(string, "REGULAR") # EARLY patches a week ahead
+
+    character_set             = optional(string, "AL32UTF8")
+    n_character_set           = optional(string, "AL16UTF16")
+    operations_insights_state = optional(string, "NOT_ENABLED") # or ENABLED
+
+    mtls_connection_required = optional(bool, true)
+    # Hostname prefix and IP for the private endpoint. Empty means Oracle picks
+    # one; an IP given here must sit inside the client subnet's CIDR.
+    private_endpoint_label = optional(string, "")
+    private_endpoint_ip    = optional(string, "")
+
+    customer_contacts   = optional(list(string), [])
+    deletion_protection = optional(bool, true)
+    labels              = optional(map(string), {})
+  }))
+  default = {}
+}
+
+# Never put these in terraform.tfvars. Supply them at apply time, keyed by the
+# same key used in gcp_autonomous_dbs:
+#
+#   export TF_VAR_gcp_adb_admin_passwords='{"adb1":"..."}'
+#
+# Oracle's rules: 12-30 chars, at least one upper, one lower and one digit, no
+# double quote, and it cannot contain the word "admin".
+variable "gcp_adb_admin_passwords" {
+  description = "ADMIN passwords for each entry in gcp_autonomous_dbs, keyed by the same map key."
+  type        = map(string)
+  sensitive   = true
+  default     = {}
+}

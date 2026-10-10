@@ -36,6 +36,50 @@ variable "zero_etl_access" {
   }
 }
 
+variable "sts_access" {
+  description = "Amazon STS access from the ODB network. Leave empty to let the service decide."
+  type        = string
+  default     = ""
+  validation {
+    condition     = contains(["ENABLED", "DISABLED", ""], var.sts_access)
+    error_message = "Must be ENABLED, DISABLED, or empty for unset."
+  }
+}
+
+variable "kms_access" {
+  description = "Amazon KMS access from the ODB network. Leave empty to let the service decide."
+  type        = string
+  default     = ""
+  validation {
+    condition     = contains(["ENABLED", "DISABLED", ""], var.kms_access)
+    error_message = "Must be ENABLED, DISABLED, or empty for unset."
+  }
+}
+
+variable "s3_policy_document" {
+  description = "Endpoint policy (JSON) for Amazon S3 access from the ODB network."
+  type        = string
+  default     = ""
+}
+
+variable "sts_policy_document" {
+  description = "Endpoint policy (JSON) for Amazon STS access from the ODB network."
+  type        = string
+  default     = ""
+}
+
+variable "kms_policy_document" {
+  description = "Endpoint policy (JSON) for Amazon KMS access from the ODB network."
+  type        = string
+  default     = ""
+}
+
+variable "cross_region_s3_restore_sources_access" {
+  description = "Regions enabled for cross-region S3 restore into this ODB network."
+  type        = set(string)
+  default     = []
+}
+
 variable "availability_zone" {
   type    = string
   default = ""

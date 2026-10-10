@@ -49,6 +49,20 @@ variable "aws_networks" {
     custom_domain_name          = optional(string, "")
     default_dns_prefix          = optional(string, "")
     delete_associated_resources = optional(bool, false)
+
+    # Separate runs on purpose: terraform fmt aligns arguments between blank
+    # lines, so keeping the long key below apart leaves the block above at its
+    # own width instead of padding every line to 38 characters.
+    #
+    # sts_access and kms_access are Optional + Computed in the provider. Leaving
+    # one empty accepts whatever the service assigned and produces no drift.
+    sts_access          = optional(string, "")
+    kms_access          = optional(string, "")
+    s3_policy_document  = optional(string, "")
+    sts_policy_document = optional(string, "")
+    kms_policy_document = optional(string, "")
+
+    cross_region_s3_restore_sources_access = optional(set(string), [])
   }))
   default = {}
 }
@@ -119,4 +133,91 @@ variable "aws_clusters" {
     is_sparse_diskgroup_enabled       = optional(bool, false)
   }))
   default = {}
+
+  # db_servers_mode is read by this blueprint, not by the AWS provider - the
+  # provider only ever sees the resulting db_servers list. So a typo is not
+  # caught by the API: anything other than "auto" silently takes the manual
+  # branch, and since db_servers defaults to [] the cluster is created with the
+  # service choosing its own servers. That looks exactly like auto-discovery
+  # having worked. Reject the typo here instead.
+  validation {
+    condition = alltrue([
+      for k, c in var.aws_clusters : contains(["auto", "manual"], c.db_servers_mode)
+    ])
+    error_message = "db_servers_mode must be exactly \"auto\" or \"manual\". \"auto\" discovers DB servers from the infrastructure; \"manual\" uses the db_servers list you supply."
+  }
+
+  # "manual" with no servers listed is the same silent outcome by a different
+  # route - the mode says you are choosing, but nothing was chosen.
+  validation {
+    condition = alltrue([
+      for k, c in var.aws_clusters :
+      c.db_servers_mode != "manual" || length(c.db_servers) > 0
+    ])
+    error_message = "A cluster with db_servers_mode = \"manual\" must list at least one entry in db_servers. Use \"auto\" to discover them from the infrastructure instead."
+  }
+}
+
+# ── Autonomous VM Clusters (ADB-D, optional) ──────────────────────────────────
+# The Autonomous counterpart of aws_clusters. Both sit on the same Exadata
+# infrastructure and ODB network - infra_ref / network_ref key into the same
+# maps - but they host different things:
+#
+#   aws_clusters             -> DB Homes / CDBs / PDBs   (see ../oci-database)
+#   aws_autonomous_clusters  -> Autonomous Container Databases / Autonomous DBs
+#
+# Sizing is per node and per Oracle Compute Unit rather than cluster totals,
+# which is why this is a separate map rather than fields on aws_clusters.
+#
+# Leave it empty and nothing here applies.
+variable "aws_autonomous_clusters" {
+  description = "Map of Autonomous VM Clusters (ADB-D). infra_ref and network_ref must match keys in aws_infras / aws_networks."
+  type = map(object({
+    display_name = string
+    infra_ref    = string
+    network_ref  = string
+
+    # Required by the API. The provider schema marks nothing required, so a
+    # missing value would otherwise surface as an apply-time error.
+    autonomous_data_storage_size_in_tbs   = number
+    cpu_core_count_per_node               = number
+    memory_per_oracle_compute_unit_in_gbs = number
+    total_container_databases             = number
+
+    scan_listener_port_tls     = optional(number, 2484)
+    scan_listener_port_non_tls = optional(number, 1521)
+
+    license_model              = optional(string, "LICENSE_INCLUDED")
+    is_mtls_enabled_vm_cluster = optional(bool, false)
+    time_zone                  = optional(string, "")
+    description                = optional(string, "")
+
+    db_servers      = optional(list(string), [])
+    db_servers_mode = optional(string, "auto") # "auto" = discover from infra, "manual" = use db_servers
+
+    # Maintenance window — required on the cluster here, unlike ExaDB-D where it
+    # lives on the infrastructure. No patching_mode or custom action timeout.
+    mw_preference         = optional(string, "NO_PREFERENCE")
+    mw_lead_time_in_weeks = optional(number, 0)
+    mw_days_of_week       = optional(list(string), [])
+    mw_months             = optional(list(string), [])
+    mw_hours_of_day       = optional(list(number), [])
+    mw_weeks_of_month     = optional(list(number), [])
+  }))
+  default = {}
+
+  validation {
+    condition = alltrue([
+      for k, c in var.aws_autonomous_clusters : contains(["auto", "manual"], c.db_servers_mode)
+    ])
+    error_message = "db_servers_mode must be exactly \"auto\" or \"manual\"."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, c in var.aws_autonomous_clusters :
+      c.db_servers_mode != "manual" || length(c.db_servers) > 0
+    ])
+    error_message = "An Autonomous cluster with db_servers_mode = \"manual\" must list at least one entry in db_servers."
+  }
 }

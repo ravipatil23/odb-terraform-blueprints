@@ -88,7 +88,7 @@ export TF_VAR_compartment_id="ocid1.compartment.oc1..."
 ## 5. Quick start
 
 ```bash
-cd blueprints/multi-az-dataguard
+cd multi-az-dataguard
 
 # 1. authenticate to OCI (see §4)
 # 2. edit terraform.tfvars — region, compartment, both VCN/NSG/CIDR sets
@@ -99,6 +99,14 @@ terraform apply
 
 # 3. add the Data Guard route to each cluster VCN by hand (see §6)
 ```
+
+**Where this sits in the sequence.** This runs *last*, against two VM clusters that already exist —
+so provision with a `db-at-*` blueprint **twice** (two ADs, same region) before you start here. The
+apply itself is **~5 minutes**: it creates an LPG pair and NSG rules, no hardware. That is a
+different order of magnitude from the multi-hour cluster build ahead of it.
+
+The apply is not the end of the job — the Data Guard routes (§6) are manual, and enabling Data Guard
+at the database layer (`dgmgrl`) comes after that and is outside this blueprint.
 
 ---
 

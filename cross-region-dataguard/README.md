@@ -21,7 +21,7 @@ OCI VCNs underneath). You only edit [`terraform.tfvars`](terraform.tfvars).
 4. [Authentication](#4-authentication)
 5. [Repository layout](#5-repository-layout)
 6. [Quick start](#6-quick-start)
-7. [The route-table decision (read this)](#7-the-route-table-decision-read-this)
+7. [Adding the Data Guard routes (manual)](#7-adding-the-data-guard-routes-manual)
 8. [Variable reference](#8-variable-reference)
 9. [Outputs](#9-outputs)
 10. [Verifying the peering](#10-verifying-the-peering)
@@ -142,7 +142,7 @@ cross-region-dataguard/
 ## 6. Quick start
 
 ```bash
-cd blueprints/cross-region-dataguard
+cd cross-region-dataguard
 
 # 1. authenticate to OCI (see §4) — must work in both regions
 # 2. edit terraform.tfvars — regions, compartment, both VCN/NSG/CIDR sets
@@ -153,6 +153,14 @@ terraform apply
 
 # 3. add the Data Guard route to each cluster VCN by hand (see §7)
 ```
+
+**Where this sits in the sequence.** This runs *last*, against two VM clusters that already exist —
+so provision with a `db-at-*` blueprint **twice** (once per region) before you start here. The apply
+itself is **~5 minutes**: hub VCNs, DRGs and remote peering, no hardware. That is a different order
+of magnitude from the multi-hour cluster build ahead of it.
+
+The apply is not the end of the job — the Data Guard routes (§7) are manual, and enabling Data Guard
+at the database layer (`dgmgrl`) comes after that and is outside this blueprint.
 
 ---
 

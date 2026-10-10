@@ -36,6 +36,12 @@ jobs:
           - multi-az-dataguard
           - cross-region-dataguard
           - azure-dns-hub
+          # oci-catalog — each template is its own root module
+          - oci-catalog/db-home
+          - oci-catalog/cdb
+          - oci-catalog/pdb
+          - oci-catalog/nsg
+          - oci-catalog/dns-forwarding-rule
     defaults:
       run:
         working-directory: ${{ matrix.dir }}

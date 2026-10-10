@@ -25,16 +25,29 @@ variable "hub_resolver_subnet_cidr" {
   description = "CIDR of the Hub VCN subnet that hosts the DNS resolver endpoints."
 }
 
-variable "hub_resolver_nsg_id" {
-  type        = string
-  description = "OCID of the NSG attached to the Hub resolver endpoints (DNS ingress is opened here)."
-}
-
 # ── Exadata VCN (this environment's spoke) ───────────────────────────────────
 
 variable "exadata_vcn_id" {
   type        = string
   description = "OCID of this environment's Exadata VCN."
+}
+
+# ── Existing LPG pair (optional) ─────────────────────────────────────────────
+# Set both when this VCN is ALREADY peered to the hub VCN. The module then
+# references that pair instead of creating one - OCI allows only one peering
+# between any two VCNs, so creating a second fails on connect and strands two
+# orphaned gateways against the per-VCN LPG limit.
+
+variable "existing_hub_lpg_id" {
+  type        = string
+  default     = null
+  description = "OCID of the hub-side LPG of an existing peering to this VCN. When set, no LPG pair is created."
+}
+
+variable "existing_exadata_lpg_id" {
+  type        = string
+  default     = null
+  description = "OCID of this VCN's side of that existing peering. Required whenever existing_hub_lpg_id is set."
 }
 
 variable "exadata_resolver_id" {
@@ -53,10 +66,16 @@ variable "exadata_resolver_subnet_cidr" {
   description = "CIDR of the Exadata resolver subnet (used in routing and DNS ingress rules)."
 }
 
-variable "exadata_resolver_nsg_id" {
+variable "exadata_resolver_security_list_id" {
   type        = string
   default     = null
-  description = "Optional NSG OCID for the Exadata forwarding endpoint. When set, DNS ingress from the hub is opened on it."
+  description = "OCID of the DEFAULT security list on this environment's resolver subnet. The DNS rules are written into it - egress to the hub resolver subnet, which is what the forwarding endpoint needs, plus matching ingress. AUTHORITATIVE: the declared rules become the whole list, so anything on it that is not declared here is removed. Null leaves the rules to you."
+}
+
+variable "allow_all_egress" {
+  type        = bool
+  default     = true
+  description = "Re-state the \"all protocols to 0.0.0.0/0\" egress rule a default security list normally ships with. On by default because the rule set is replaced wholesale, and silently dropping egress would break outbound traffic from every subnet the list governs."
 }
 
 # ── DNS forwarding behaviour ─────────────────────────────────────────────────

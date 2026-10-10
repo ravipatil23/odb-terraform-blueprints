@@ -17,3 +17,21 @@ output "oci_vcn_id" {
   description = "OCI VCN identifier."
   value       = aws_odb_network.this.oci_vcn_id
 }
+
+# Effective service-access flags. sts_access and kms_access are Optional +
+# Computed, so when the input is left blank these report what the service
+# assigned rather than what the config asked for.
+output "s3_access" {
+  description = "Effective Amazon S3 access state of the ODB network."
+  value       = aws_odb_network.this.s3_access
+}
+
+output "sts_access" {
+  description = "Effective Amazon STS access state of the ODB network."
+  value       = aws_odb_network.this.sts_access
+}
+
+output "kms_access" {
+  description = "Effective Amazon KMS access state of the ODB network."
+  value       = aws_odb_network.this.kms_access
+}

@@ -401,7 +401,7 @@ oci_database_autonomous_database
   oci_database_autonomous_database.compute_count: "number", optional+computed
   oci_database_autonomous_database.compute_model: "string", optional+computed
   oci_database_autonomous_database.connection_strings: ["list",["object",{"all_connection_strings":["map","string"],"dedicated":"string","high":"string","low":"string","medium":"string","profiles":["list",["object",{"consumer_group":"string","display_name":"string","host_format":"string","is_regional":"bool","protocol":"string","session_mode":"string","syntax_format":"string","tls_authentication":"string","value":"string"}]]}]], computed
-  oci_database_autonomous_database.connection_urls: ["list",["object",{"apex_url":"string","database_transforms_url":"string","graph_studio_url":"string","machine_learning_notebook_url":"string","machine_learning_user_management_url":"string","mongo_db_url":"string","ords_url":"string","spatial_studio_url":"string","sql_dev_web_url":"string"}]], computed
+  oci_database_autonomous_database.connection_urls: ["list",["object",{"apex_url":"string","database_transforms_url":"string","essbase_url":"string","graph_studio_url":"string","machine_learning_notebook_url":"string","machine_learning_user_management_url":"string","mongo_db_url":"string","ords_url":"string","spatial_studio_url":"string","sql_dev_web_url":"string"}]], computed
   oci_database_autonomous_database.cpu_core_count: "number", optional+computed
   oci_database_autonomous_database.customer_contacts.email: "string", optional+computed
   oci_database_autonomous_database.customer_contacts: block list [0..*]
@@ -510,7 +510,7 @@ oci_database_autonomous_database
   oci_database_autonomous_database.private_endpoint_ip: "string", optional+computed
   oci_database_autonomous_database.private_endpoint_label: "string", optional+computed
   oci_database_autonomous_database.provisionable_cpus: ["list","number"], computed
-  oci_database_autonomous_database.public_connection_urls: ["list",["object",{"apex_url":"string","database_transforms_url":"string","graph_studio_url":"string","machine_learning_notebook_url":"string","machine_learning_user_management_url":"string","mongo_db_url":"string","ords_url":"string","spatial_studio_url":"string","sql_dev_web_url":"string"}]], computed
+  oci_database_autonomous_database.public_connection_urls: ["list",["object",{"apex_url":"string","database_transforms_url":"string","essbase_url":"string","graph_studio_url":"string","machine_learning_notebook_url":"string","machine_learning_user_management_url":"string","mongo_db_url":"string","ords_url":"string","spatial_studio_url":"string","sql_dev_web_url":"string"}]], computed
   oci_database_autonomous_database.public_endpoint: "string", computed
   oci_database_autonomous_database.refreshable_mode: "string", optional+computed
   oci_database_autonomous_database.refreshable_status: "string", computed
@@ -590,7 +590,7 @@ oci_database_autonomous_database
   oci_database_autonomous_database.use_latest_available_backup_time_stamp: "bool", optional+computed
   oci_database_autonomous_database.used_data_storage_size_in_gbs: "number", computed
   oci_database_autonomous_database.used_data_storage_size_in_tbs: "number", computed
-  oci_database_autonomous_database.vanity_connection_urls: ["list",["object",{"apex_url":"string","database_transforms_url":"string","graph_studio_url":"string","machine_learning_notebook_url":"string","machine_learning_user_management_url":"string","mongo_db_url":"string","ords_url":"string","sql_dev_web_url":"string"}]], computed
+  oci_database_autonomous_database.vanity_connection_urls: ["list",["object",{"apex_url":"string","database_transforms_url":"string","essbase_url":"string","graph_studio_url":"string","machine_learning_notebook_url":"string","machine_learning_user_management_url":"string","mongo_db_url":"string","ords_url":"string","sql_dev_web_url":"string"}]], computed
   oci_database_autonomous_database.vanity_url_details.api_gateway_id: "string", optional+computed
   oci_database_autonomous_database.vanity_url_details.is_disabled: "bool", optional+computed
   oci_database_autonomous_database.vanity_url_details.vanity_url_host_name: "string", optional+computed
@@ -641,13 +641,16 @@ oci_database_database
   oci_database_database.database.db_workload: "string", optional+computed
   oci_database_database.database.defined_tags: ["map","string"], optional+computed
   oci_database_database.database.encryption_key_location_details.aws_encryption_key_id: "string", optional+computed
+  oci_database_database.database.encryption_key_location_details.aws_encryption_key_pool_id: "string", optional+computed
   oci_database_database.database.encryption_key_location_details.azure_encryption_key_id: "string", optional+computed
   oci_database_database.database.encryption_key_location_details.google_cloud_provider_encryption_key_id: "string", optional+computed
   oci_database_database.database.encryption_key_location_details.hsm_password: "string", optional, sensitive
   oci_database_database.database.encryption_key_location_details.provider_type: "string", required
   oci_database_database.database.encryption_key_location_details: block list [0..1]
   oci_database_database.database.freeform_tags: ["map","string"], optional+computed
-  oci_database_database.database.is_active_data_guard_enabled: "bool", optional
+  oci_database_database.database.is_active_data_guard_enabled: "bool", optional+computed
+  oci_database_database.database.is_thin_clone: "bool", optional+computed
+  oci_database_database.database.key_store_id: "string", optional+computed
   oci_database_database.database.kms_key_id: "string", optional+computed
   oci_database_database.database.kms_key_version_id: "string", optional+computed
   oci_database_database.database.managed_software_update_details.is_enrolled: "bool", optional+computed
@@ -677,10 +680,17 @@ oci_database_database
   oci_database_database.database.protection_mode: "string", optional
   oci_database_database.database.recovery_appliance_vpc_password: "string", optional+computed, sensitive
   oci_database_database.database.sid_prefix: "string", optional+computed
-  oci_database_database.database.source_database_id: "string", optional
+  oci_database_database.database.source_admin_password: "string", optional+computed, sensitive
+  oci_database_database.database.source_database_id: "string", optional+computed
+  oci_database_database.database.source_encryption_key_location_details.aws_encryption_key_id: "string", optional+computed
+  oci_database_database.database.source_encryption_key_location_details.aws_encryption_key_pool_id: "string", optional+computed
+  oci_database_database.database.source_encryption_key_location_details.azure_encryption_key_id: "string", optional+computed
+  oci_database_database.database.source_encryption_key_location_details.google_cloud_provider_encryption_key_id: "string", optional+computed
   oci_database_database.database.source_encryption_key_location_details.hsm_password: "string", optional, sensitive
   oci_database_database.database.source_encryption_key_location_details.provider_type: "string", required
   oci_database_database.database.source_encryption_key_location_details: block list [0..1]
+  oci_database_database.database.source_snapshot_id: "string", optional+computed
+  oci_database_database.database.source_tde_password: "string", optional+computed, sensitive
   oci_database_database.database.source_tde_wallet_password: "string", optional, sensitive
   oci_database_database.database.storage_size_details.data_storage_size_in_gb: "number", required
   oci_database_database.database.storage_size_details.reco_storage_size_in_gbs: "number", required
@@ -784,6 +794,7 @@ oci_database_db_home
   oci_database_db_home.database.db_workload: "string", optional+computed
   oci_database_db_home.database.defined_tags: ["map","string"], optional+computed
   oci_database_db_home.database.encryption_key_location_details.aws_encryption_key_id: "string", optional+computed
+  oci_database_db_home.database.encryption_key_location_details.aws_encryption_key_pool_id: "string", optional+computed
   oci_database_db_home.database.encryption_key_location_details.azure_encryption_key_id: "string", optional+computed
   oci_database_db_home.database.encryption_key_location_details.google_cloud_provider_encryption_key_id: "string", optional+computed
   oci_database_db_home.database.encryption_key_location_details.hsm_password: "string", optional, sensitive

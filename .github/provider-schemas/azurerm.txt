@@ -23,6 +23,7 @@ azurerm_oracle_autonomous_database
   azurerm_oracle_autonomous_database.long_term_backup_schedule.retention_period_in_days: "number", required
   azurerm_oracle_autonomous_database.long_term_backup_schedule.time_of_backup: "string", required
   azurerm_oracle_autonomous_database.long_term_backup_schedule: block list [0..1]
+  azurerm_oracle_autonomous_database.maintenance_patch_level: "string", optional
   azurerm_oracle_autonomous_database.mtls_connection_required: "bool", required
   azurerm_oracle_autonomous_database.name: "string", required
   azurerm_oracle_autonomous_database.national_character_set: "string", required
@@ -275,6 +276,7 @@ azurerm_subnet
   azurerm_subnet.virtual_network_name: "string", required
 azurerm_virtual_network
   azurerm_virtual_network.address_space: ["set","string"], optional
+  azurerm_virtual_network.advertised_gateway_prefixes: ["set","string"], optional
   azurerm_virtual_network.bgp_community: "string", optional
   azurerm_virtual_network.ddos_protection_plan.enable: "bool", required
   azurerm_virtual_network.ddos_protection_plan.id: "string", required
